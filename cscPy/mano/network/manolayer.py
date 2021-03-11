@@ -223,7 +223,7 @@ class MANO_SMPL(nn.Module):
         np_posedirs = torch.from_numpy(np_posedirs).float()
 
         self.parents = np.array(model['kintree_table'])[0].astype(np.int32)
-        print('self.parents',self.parents)
+        #print('self.parents',self.parents)
 
         np_weights = np.array(model['weights'], dtype=np.float)
         vertex_count = np_weights.shape[0]
@@ -558,14 +558,18 @@ class MANO_SMPL(nn.Module):
         #restrainFingerDOF=1 forward
         #restrainFingerDOF=2 backward
         #restrainFingerDOF=3 backward+finger angle
-
-
-
-        device = joint_gt.device
         N = joint_gt.shape[0]
         joint_gt = joint_gt.reshape(N, 21, 3)
         if (not torch.is_tensor(joint_gt)):
-            joint_gt = torch.tensor(joint_gt, device=device, dtype=torch.float32)
+            joint_gt = torch.tensor(joint_gt, device='cpu', dtype=torch.float32)
+        device = joint_gt.device
+
+        # first make wrist to zero
+
+        orijoint_gt=joint_gt.clone()
+        oriWrist = orijoint_gt[:, 0:1, :].clone()
+        joint_gt = joint_gt- oriWrist.clone()
+
         transformG = torch.eye(4, dtype=torch.float32, device=device).reshape(1, 1, 4, 4).repeat(N, 16, 1,
                                                                                                  1).reshape(N,
                                                                                                             16, 4, 4)
@@ -693,6 +697,12 @@ class MANO_SMPL(nn.Module):
         outjoints = rotate2joint(wrist_trans, local_trans, tempJori, self.parents).reshape(N,21,3)
         assert (torch.mean(torch.sqrt(torch.sum((outjoints-tempJ)**2,dim=2)))<2),"outjoints and tempJ epe should be small"+str(torch.mean(torch.sqrt(torch.sum((outjoints - tempJ) ** 2, dim=2))))
         #print(torch.mean(torch.sqrt(torch.sum((outjoints - tempJ) ** 2, dim=2))))
+
+        outjoints = outjoints + oriWrist
+        # print('oriWrist',oriWrist)
+        # print('innr edu',torch.mean(torch.sqrt(torch.sum((outjoints-orijoint_gt)**2,dim=2))))
+        # print('innr2 edu',torch.mean(torch.sqrt(torch.sum(((outjoints+oriWrist)-(orijoint_gt))**2,dim=2))))
+
 
         if(restrainFingerDOF==3):
             return wrist_trans, local_trans, outjoints,loss

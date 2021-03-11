@@ -75,7 +75,6 @@ class RHDJointsDateset(Dataset):
             joints = kp_coord_xyz[-21:, :]*1000
         else:
             joints = kp_coord_xyz[21:, :]*1000
-            joints[:, 0] *= -1  # from left hand to right hand
         joints = joints[RHD2Bighand_skeidx, :][Bighand2mano_skeidx, :]
 
         #print(joints)
@@ -89,7 +88,8 @@ class RHDJointsDateset(Dataset):
         # dum[4], dum[7] = [0, 1, 0], [-1, 1, 0]
         # r = wristRot(joints, dum)
         # joints = ((r @ joints.T).T).reshape(21, 3).astype(np.float32)
-
+	
+	if(righthand==False):joints[:, 0] *= -1  # from left hand to right hand
 
 
         dirjoints=getDir(joints)

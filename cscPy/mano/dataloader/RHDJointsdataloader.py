@@ -77,7 +77,7 @@ class RHDJointsDateset(Dataset):
             joints = kp_coord_xyz[-21:, :]*1000
         else:
             joints = kp_coord_xyz[21:, :]*1000
-            joints[:, 0] *= -1  # from left hand to right hand
+            #joints[:, 0] *= -1  # from left hand to right hand
         joints = joints[RHD2Bighand_skeidx, :][Bighand2mano_skeidx, :]
 
         #print(joints)
@@ -120,11 +120,11 @@ if __name__ == '__main__':
     def _init_fn(worker_id):
         np.random.seed(worker_id)
 
-    train_dataset=RHDJointsDateset(mode=set,righthand=False)
+    train_dataset=RHDJointsDateset(mode=set,righthand=True)
     #train_dataset=STBDateset3D()
     train_loader = torch.utils.data.DataLoader(train_dataset, batch_size=32, num_workers=4, shuffle=False,
                                                worker_init_fn=_init_fn,)
-    mano_right = MANO_SMPL('/home/csc/MANO-hand-model-toolkit/mano/models/MANO_RIGHT.pkl', ncomps=45,
+    mano_right = MANO_SMPL('/home/csc/MANO-hand-model-toolkit/mano/models/MANO_'+"RIGHT.pkl" if train_dataset.righthand else 'LEFT.pkl', ncomps=45,
                            bighandorder=False)
     minn = 5
     allepochs = 100
@@ -135,7 +135,7 @@ if __name__ == '__main__':
         aveloss, aveloss2 = [], []
         model.eval()
         cnt = 0
-        if(epoch==51):break
+        if(epoch==71):break
 
         for idx, (out) in enumerate(train_loader):
             cnt += 1
@@ -158,7 +158,7 @@ if __name__ == '__main__':
                                              results['pose_aa'][:, 1:, :], results['shape'],
                                              results['scale'], results['transition'],
                                              pose_type='euler', mmcp_center=False)
-            if (epoch==50):
+            if (epoch==70):
                 np_rot_x = np.array([[1, 0, 0], [0, -1, 0], [0, 0, -1]], dtype=np.float32)
                 np_rot_x = np.reshape(np.tile(np_rot_x, [1, 1]), [1, 3, 3])
                 vertex,scale,joint_root=vertex.reshape(n,778,3),scale.reshape(n,1,1),joint_root.reshape(n,1,3)
@@ -216,7 +216,7 @@ if __name__ == '__main__':
 
     out=np.concatenate(vertexout,axis=0)
     print(out.shape)
-    with open('rhdTestLeftHand.npy', 'wb') as f:
+    with open('rhdTest'+"RIGHTHand.npy" if train_dataset.righthand else 'LEFTHand.npy', 'wb') as f:
         np.save(f, out)
 
 
