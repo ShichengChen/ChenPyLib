@@ -390,7 +390,7 @@ class MANO_SMPL(nn.Module):
         #
         if pose_type == 'pca':
             pose = pose.clamp(-2.,2.)
-            #shape = shape.clamp(-0.03, 0.03)
+        shape = shape.clamp(-0.03, 0.03)
 
         verts, joints, Rs = self.forward(shape, pose, wrist_euler, pose_type, get_skin=True,external_transition=external_transition)
 

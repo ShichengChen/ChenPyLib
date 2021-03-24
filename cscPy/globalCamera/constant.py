@@ -28,3 +28,10 @@ class Constant:
     detect_img_ratio = 0.25
     detect_width = int(width * detect_img_ratio)#160
     detect_height = int(height * detect_img_ratio)#120
+
+    joint_color = [(255, 0, 0)] * 1 + \
+                  [(25, 255, 25)] * 4 + \
+                  [(212, 0, 255)] * 4 + \
+                  [(0, 230, 230)] * 4 + \
+                  [(179, 179, 0)] * 4 + \
+                  [(255, 153, 153)] * 4
