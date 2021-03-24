@@ -1,6 +1,6 @@
 from cscPy.mano.network.manolayer import MANO_SMPL
 import os,pickle
-from cscPy.globalCamera.util import fetch_all_sequences,load_rgb_maps,load_depth_maps,get_cameras_from_dir
+from cscPy.globalCamera.util import fetch_all_sequences,load_rgb_maps,load_depth_maps,get_cameras_from_dir,visualize_better_qulity_depth_map
 from cscPy.globalCamera.camera import CameraIntrinsics,perspective_projection,perspective_back_projection
 from cscPy.globalCamera.constant import Constant
 from cscPy.mano.network import net
@@ -8,6 +8,7 @@ from cscPy.mano.network.utils import AxisRotMat
 from cscPy.mano.dataloader.MFjointsDataloader import MF3D
 import numpy as np
 import torch
+import cv2
 
 class MultiviewDatasetDemo():
     def __init__(self,manoPath='/home/csc/MANO-hand-model-toolkit/mano/models/MANO_RIGHT.pkl',
@@ -69,6 +70,34 @@ class MultiviewDatasetDemo():
         for iv in range(4):color.append(self.rgb_seqs[iv][idx].copy())
         color = np.hstack(color)
         return color
+    def getImgsList(self,idx,facemask=True):
+        color=[]
+        facelist = [[], [], [(250, 0, 424, 100)], [(436, 0, 640, 200)]]
+        for iv in range(4):
+            img=self.rgb_seqs[iv][idx].copy()
+            if facemask:
+                for (x, y, x1, y1) in facelist[iv]:
+                    mask2 = np.zeros_like(img).astype(np.bool)
+                    mask2[y:y1, x:x1, :] = True
+                    # mask2[mask, :] = False
+                    rgbcopy = img.copy()
+                    img = cv2.blur(img, (40, 40))
+                    img[mask2 == False] = rgbcopy[mask2 == False]
+            color.append(img)
+
+
+        return color
+    def getDepth(self,idx):
+        dms = []
+        for iv in range(4): dms.append(self.depth_seqs[iv][idx].copy())
+        dms = np.hstack(dms)
+        return dms
+    def getBetterDepth(self,idx):
+        dlist = []
+        for iv in range(4):
+            depth = self.depth_seqs[iv][idx].copy()
+            dlist.append(visualize_better_qulity_depth_map(depth))
+        return np.hstack(dlist)
 
     def getManoVertex(self,idx):
         ids, (joints_gt, scale, joint_root, direct)=self.train_dataset.__getitem__(idx)
@@ -132,6 +161,14 @@ class MultiviewDatasetDemo():
         meshcolor = np.hstack(recolorlist)
         return meshcolor
 
+
+    def drawMesh(self,idx):
+        recolor=self.render4mesh(idx)
+        color=np.hstack(self.getImgsList(idx))
+        recolor[recolor == 255] = color[recolor == 255]
+        c = cv2.addWeighted(color, 0.1, recolor, 0.9, 0.0)
+        return c
+
     def drawMask(self,idx):
         #call after get4viewManovertices and
         self.getManoVertex(idx)
@@ -146,7 +183,6 @@ class MultiviewDatasetDemo():
         cloud=cloud[dcloud < 10]
         assert (cloud.shape[0]>0),"nothing left for draw"
         cloud4v = np.ones([4, cloud.shape[0], 4, 1])
-        import cv2
         background = np.ones([4, 480, 640, 3]).astype(np.uint8) * 255
         for iv in range(4):
             inv = np.linalg.inv(self.camera_pose[iv])
@@ -205,25 +241,30 @@ class MultiviewDatasetDemo():
             cloud4v[iv] = inv @ cloud
         self.cloud4v=cloud4v
         return cloud4v
-    def drawCloud4view(self,idx,sampleN=1000,view=4):
+    def drawCloud4view(self,idx,sampleN=1000,view=4,depthInfluenceColor=False):
         assert (view==1 or view==4),"only support 4 and 1 view"
         background = np.ones([4, 480, 640, 3]).astype(np.uint8) * 255
         cloud4v=self.get4viewCloud(idx,sampleN)
-        import cv2
         for iv in range(4):
             vis = np.zeros([480, 640])
             for i in range(cloud4v.shape[1]):
                 uvd=perspective_projection(cloud4v[iv,i,:3,0],self.camera[iv]).astype(np.int64)
                 if(uvd[1]<0 or uvd[0]<0 or uvd[0]>=640 or uvd[1]>=480 or vis[uvd[1],uvd[0]]==255):continue
+                #if(iv==0):print('ori', uvd[-1])
+                dist=255
+                if(depthInfluenceColor):dist = int(np.clip(np.array([(uvd[-1] - 500)])*3, 50, 200).astype(int)[0])
+                #if(iv==0):print('after',int(dist))
                 vis=cv2.circle(vis, tuple(uvd[:2]), 1, (255),-1)
-                background[iv]=cv2.circle(background[iv],tuple(uvd[:2]),1,(255,0,0))
+
+                background[iv]=cv2.circle(background[iv],tuple(uvd[:2]),1,(dist, 0, 200-dist))
+                #background[iv]=cv2.circle(background[iv],tuple(uvd[:2]),1,(dist, dist, dist))
         if(view==4):
             background = np.concatenate([background[0], background[1], background[2], background[3]], axis=1)
         else:
             background = background[0]
         return background
 
-    def drawSelfRotationCloudView0(self,idx,degree):
+    def drawSelfRotationCloudView0(self,idx,degree,depthInfluenceColor=False):
         rot=AxisRotMat(degree,[1,0,0])
         c=self.cloud4v[0].copy()
         wrist=self.joints4view[0,idx,5:6,:3,0]
@@ -232,30 +273,32 @@ class MultiviewDatasetDemo():
         c[:,:3,0]+=wrist
         background = np.ones([480, 640, 3]).astype(np.uint8) * 255
         vis = np.zeros([480, 640])
-        import cv2
         for i in range(c.shape[0]):
             uvd = perspective_projection(c[i, :3, 0], self.camera[0]).astype(np.int64)
             if (uvd[1] < 0 or uvd[0] < 0 or uvd[0] >= 640 or uvd[1] >= 480 or vis[uvd[1], uvd[0]] == 255): continue
             vis = cv2.circle(vis, tuple(uvd[:2]), 1, (255), -1)
-            background = cv2.circle(background, tuple(uvd[:2]), 1, (255, 0, 0))
+            dist = 255
+            if (depthInfluenceColor): dist = int(np.clip(np.array([(uvd[-1] - 500)]) * 3, 50, 200).astype(int)[0])
+            background = cv2.circle(background, tuple(uvd[:2]), 1, (dist, 0, 200-dist))
+            #background=cv2.circle(background,tuple(uvd[:2]),1,(dist, dist, dist))
         return background
 
 
     def drawPose4view(self,idx,view=4):
         assert (view == 1 or view == 4), "only support 4 and 1 view"
         lineidx = [2, 3, 4, 6, 7, 8, 10, 11, 12, 14, 15, 16, 18, 19, 20]
-        uvdlist,imgs = [],[]
-        import cv2
+        uvdlist = []
+        imgs=self.getImgsList(idx)
         for iv in range(4):
-            img = self.rgb_seqs[iv][idx].copy()
-            imgs.append(img)
             ujoints=self.joints4view[iv,idx,:21,:3,0].copy()
             for jdx in range(21):
                 rgbuvd = perspective_projection(ujoints[jdx], self.camera[iv]).astype(int)[:2]
                 uvdlist.append(rgbuvd)
-                imgs[iv] = cv2.circle(imgs[iv], tuple(rgbuvd), 3, Constant.joint_color[jdx], -1)
+
+                color=np.array(Constant.joint_color[jdx]).astype(int)
+                imgs[iv] = cv2.circle(imgs[iv], tuple(rgbuvd), 3, color.tolist(), -1)
                 if (jdx in lineidx):
-                    imgs[iv] = cv2.line(imgs[iv], tuple(rgbuvd), tuple(uvdlist[-2]), Constant.joint_color[jdx], thickness=2)
+                    imgs[iv] = cv2.line(imgs[iv], tuple(rgbuvd), tuple(uvdlist[-2]), color.tolist(), thickness=2)
         if(view==1):imgs = imgs[0].copy()
         else:imgs = np.hstack(imgs)
         return imgs

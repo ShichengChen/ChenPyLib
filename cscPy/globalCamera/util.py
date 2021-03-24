@@ -53,6 +53,20 @@ def visualize_depth_map(depth_image):
         vis_depth_image = vis_depth_image.astype(np.uint8)
         return vis_depth_image
         # return cv2.cvtColor(vis_depth_image, cv2.COLOR_GRAY2BGR)
+def visualize_better_qulity_depth_map(depth_image):
+    vis_depth_image = depth_image.copy().astype(np.float32)
+    vis_depth_image = np.clip(vis_depth_image,0,2000)
+    vis_depth_image = vis_depth_image * 255 / 2000
+    vis_depth_image[vis_depth_image < 10] = 255
+    vis_depth_image=vis_depth_image*3-50
+    # mask=(vis_depth_image>60)&(vis_depth_image<100)
+    # vis_depth_image[mask]=vis_depth_image[mask]*3-50
+    # vis_depth_image[~mask]*=2
+    #print(vis_depth_image)
+    vis_depth_image = np.clip(vis_depth_image, 0, 255)
+    vis_depth_image = vis_depth_image.astype(np.uint8)
+
+    return cv2.cvtColor(vis_depth_image, cv2.COLOR_GRAY2BGR)
 
 def get_cameras_from_dir(data_dir, folder_name, sequence_name):
     regex = os.path.join(data_dir,
