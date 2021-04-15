@@ -14,22 +14,29 @@ class MultiviewDatasetDemo():
     def __init__(self,manoPath='/home/csc/MANO-hand-model-toolkit/mano/models/MANO_RIGHT.pkl',
                  file_path="/media/csc/Seagate Backup Plus Drive/dataset/7-14-1-2/mlresults/7-14-1-2_3_2result_32.pkl",
                  loadMode=True,
+                 readIndividual=False,
+                 loadManoParam=False,
 
     ):
         self.mano_right = MANO_SMPL(manoPath, ncomps=45)
+        self.readIndividual=readIndividual
+        self.loadManoParam=loadManoParam
 
         baseDir = file_path[:file_path.rfind('/', 0, file_path.rfind('/'))]
+        self.baseDir=baseDir
         self.date = baseDir[baseDir.rfind('/') + 1:]
         calib_path = os.path.join(baseDir, 'calib.pkl')
         print("baseDir", baseDir)
         with open(calib_path, 'rb') as f:
             camera_pose_map = pickle.load(f)
         rgb_paths, depth_paths = fetch_all_sequences(os.path.join(baseDir, "1_840412062035_depth.bin"))
-        self.rgb_seqs = [load_rgb_maps(p)[100:] for p in rgb_paths]
-        self.depth_seqs = [load_depth_maps(p)[100:] for p in depth_paths]
+
+        if(not self.readIndividual):
+            self.rgb_seqs = [load_rgb_maps(p)[100:] for p in rgb_paths]
+            self.depth_seqs = [load_depth_maps(p)[100:] for p in depth_paths]
 
 
-        cam_list = get_cameras_from_dir(baseDir[:baseDir.rfind('/')], baseDir[baseDir.rfind('/') + 1:], "1")
+        cam_list = ['840412062035','840412062037','840412062038','840412062076']
         self.cam_list = cam_list
         cam_list.sort()
         print('cam_list', cam_list)
@@ -63,19 +70,84 @@ class MultiviewDatasetDemo():
             model.load_state_dict(checkpoint['iknet'])
             model.eval()
             self.model=model
+        if(loadManoParam):
+            with open(os.path.join(self.baseDir,self.date+'manoParam.pkl'), 'rb') as f:
+                self.manoparam = pickle.load(f)
 
+    def getCameraPose(self):
+        calib_path = os.path.join(baseDir, 'calib.pkl')
+        with open(calib_path, 'rb') as f:
+            camera_pose_map = pickle.load(f)
+        cam_list = ['840412062035', '840412062037', '840412062038', '840412062076']
+        camera_pose = []
+        for camera_ser in cam_list:
+            camera_pose.append(camera_pose_map[camera_ser])
+        return camera_pose
 
-    def getImgs(self,idx):
+    def saveRGB(self,idx):
+        rgbpath=os.path.join(self.baseDir,'rgb')
+        if not os.path.exists(rgbpath):os.mkdir(rgbpath)
+        #cv2.imwrite(os.path.join(rgbpath,str(idx)+'.png'), self.getImgs(idx), [cv2.IMWRITE_PNG_COMPRESSION, 0])
+        for iv in range(4):
+            cv2.imwrite(os.path.join(rgbpath,"%05d" % (idx)+'_'+str(iv)+'.jpg'), self.getImgs(idx,uselist=True)[iv])
+    def saveDepth(self,idx):
+        dpath=os.path.join(self.baseDir,'depth')
+        if not os.path.exists(dpath):os.mkdir(dpath)
+        for iv in range(4):
+            # cv2.imshow("d0",self.getDepth(idx,uselist=True)[iv])
+            # print(self.getDepth(idx,uselist=True)[iv])
+            cur=self.getDepth(idx,uselist=True)[iv].astype(np.uint16)
+            d=np.zeros([cur.shape[0],cur.shape[1],3],dtype=np.uint8)
+            path=os.path.join(dpath, "%05d" % (idx) + '_' + str(iv) + '.png')
+            d[:,:,0],d[:,:,1]=cur[:,:,0]%256,cur[:,:,0]//256
+            cv2.imwrite(path, d, [cv2.IMWRITE_PNG_COMPRESSION, 10])
+            # cv2.imshow("d",d)
+            # print(d)
+            # d2=self.decodeDepth(cv2.imread(path))
+            # print("---------")
+            # print(d2)
+            # cv2.imshow("d2",visualize_better_qulity_depth_map(d2.reshape(*(d2.shape),1)))
+            # cv2.waitKey(0)
+
+    def readRGB(self,idx,iv):
+        if(self.readIndividual):
+            rgbpath = os.path.join(self.baseDir, 'rgb')
+            rgbpath = os.path.join(rgbpath, "%05d" % (idx) + '_' + str(iv) + '.jpg')
+            return cv2.imread(rgbpath)
+        else: return self.rgb_seqs[iv][idx].copy()
+
+    def decodeDepth(self,rgb:np.ndarray):
+        """ Converts a RGB-coded depth into depth. """
+        assert (rgb.dtype==np.uint8)
+        r, g, _ = rgb[:, :, 0], rgb[:, :, 1], rgb[:, :, 2]
+        depth = (r.astype(np.uint64) + g.astype(np.uint64) * 256).astype(np.uint16)
+        return depth
+
+    def readDepth(self,idx,iv):
+        if (self.readIndividual):
+            dpath = os.path.join(self.baseDir, 'depth')
+            dpath = os.path.join(dpath, "%05d" % (idx) + '_' + str(iv) + '.jpg')
+            return self.decodeDepth(cv2.imread(dpath))
+            #return cv2.imread(dpath)
+        else:
+            return self.depth_seqs[iv][idx].copy()
+
+    def getManoParamFromDisk(self,idx):
+        #return a dictionary which includes mano pose parameters, scale, and transition
+        assert (self.loadManoParam==True)
+        return self.manoparam[idx]
+
+    def getImgs(self,idx,uselist=False):
+        if(uselist):return self.getImgsList(idx)
         color=[]
-        for iv in range(4):color.append(self.rgb_seqs[iv][idx].copy())
-        color = np.hstack(color)
-        return color
+        for iv in range(4):color.append(self.readRGB(idx,iv))
+        return np.hstack(color)
     def getImgsList(self,idx,facemask=True):
         color=[]
         facelist = [[], [], [(250, 0, 424, 100)], [(436, 0, 640, 200)]]
         for iv in range(4):
-            img=self.rgb_seqs[iv][idx].copy()
-            if facemask:
+            img=self.readRGB(idx,iv)
+            if facemask and self.readIndividual==False:
                 for (x, y, x1, y1) in facelist[iv]:
                     mask2 = np.zeros_like(img).astype(np.bool)
                     mask2[y:y1, x:x1, :] = True
@@ -87,24 +159,20 @@ class MultiviewDatasetDemo():
 
 
         return color
-    def getDepth(self,idx):
+    def getDepth(self,idx,uselist=False):
         dms = []
-        for iv in range(4): dms.append(self.depth_seqs[iv][idx].copy())
-        dms = np.hstack(dms)
-        return dms
+        for iv in range(4): dms.append(self.readDepth(idx,iv))
+        if(uselist):return dms
+        else:return np.hstack(dms)
     def getBetterDepth(self,idx):
         dlist = []
         for iv in range(4):
-            depth = self.depth_seqs[iv][idx].copy()
+            depth = self.readDepth(idx,iv)
             dlist.append(visualize_better_qulity_depth_map(depth))
         return np.hstack(dlist)
 
     def getManoVertex(self,idx):
-        ids, (joints_gt, scale, joint_root, direct)=self.train_dataset.__getitem__(idx)
-        direct = direct.to('cuda')
-        joints_gt = joints_gt.to('cuda')
-        jd = torch.cat([joints_gt, direct], dim=0).reshape(1,41,3)
-        results = self.model(jd)
+        results = self.getManoParam(idx)
         vertex, joint_pre = \
             self.mano_right.get_mano_vertices(results['pose_aa'][:, 0:1, :],
                                          results['pose_aa'][:, 1:, :], results['shape'],
@@ -118,6 +186,15 @@ class MultiviewDatasetDemo():
         vertices = np.expand_dims(vertices, axis=-1)
         self.vertices=vertices
         return vertices
+
+    def getManoParam(self,idx):
+        ids, (joints_gt, scale, joint_root, direct)=self.train_dataset.__getitem__(idx)
+        direct = direct.to('cuda')
+        joints_gt = joints_gt.to('cuda')
+        jd = torch.cat([joints_gt, direct], dim=0).reshape(1,41,3)
+        results = self.model(jd)
+        return results
+
 
     def get4viewManovertices(self,idx):
         vertices=self.getManoVertex(idx)
@@ -201,7 +278,7 @@ class MultiviewDatasetDemo():
         pointlist=[]
 
         for iv in range(4):
-            dm=self.depth_seqs[iv][idx].copy()
+            dm=self.readDepth(idx,iv)
             u, v = np.meshgrid(range(640), range(480))
             u, v, d = u.reshape(-1), v.reshape(-1), dm.reshape(-1)
             uvd = np.transpose(np.stack([u.astype(np.float32), v.astype(np.float32), d]))
@@ -283,6 +360,11 @@ class MultiviewDatasetDemo():
             #background=cv2.circle(background,tuple(uvd[:2]),1,(dist, dist, dist))
         return background
 
+
+    def getMMCP(self,idx,iv):
+        ujoints=self.joints4view[iv,idx,:21,:3,0].copy()
+        rgbuvd = perspective_projection(ujoints[5], self.camera[iv]).astype(int)[:2]
+        return rgbuvd.reshape(-1).astype(int)[:2]
 
     def drawPose4view(self,idx,view=4):
         assert (view == 1 or view == 4), "only support 4 and 1 view"

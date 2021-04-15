@@ -297,10 +297,6 @@ class MANO_SMPL(nn.Module):
         if(zero_wrist):J-=J[:,0:1,:].clone()
         return J
 
-
-
-
-
     def forward(self, beta, theta, wrist_euler, pose_type, get_skin=False,external_transition=None):
         assert pose_type in ['pca', 'euler', 'rot_matrix'], print('The type of pose input should be pca, euler or rot_matrix')
         num_batch = beta.shape[0]
