@@ -12,14 +12,16 @@ import cv2
 
 class MultiviewDatasetDemo():
     def __init__(self,manoPath='/home/csc/MANO-hand-model-toolkit/mano/models/MANO_RIGHT.pkl',
-                 file_path="/media/csc/Seagate Backup Plus Drive/dataset/7-14-1-2/mlresults/7-14-1-2_3_2result_32.pkl",
+                 #file_path="/media/csc/Seagate Backup Plus Drive/dataset/7-14-1-2/mlresults/7-14-1-2_3_2result_32.pkl",
+                 file_path="/media/csc/Seagate Backup Plus Drive/dataset/9-10-1-2/mlresults/9-10-1-2_1result_38.pkl",
                  loadMode=True,
-                 readIndividual=False,
+                 readNotFromBinary=False,
                  loadManoParam=False,
 
     ):
+
         self.mano_right = MANO_SMPL(manoPath, ncomps=45)
-        self.readIndividual=readIndividual
+        self.readNotFromBinary=readNotFromBinary
         self.loadManoParam=loadManoParam
 
         baseDir = file_path[:file_path.rfind('/', 0, file_path.rfind('/'))]
@@ -31,15 +33,16 @@ class MultiviewDatasetDemo():
             camera_pose_map = pickle.load(f)
         rgb_paths, depth_paths = fetch_all_sequences(os.path.join(baseDir, "1_840412062035_depth.bin"))
 
-        if(not self.readIndividual):
+        if(not self.readNotFromBinary):
             self.rgb_seqs = [load_rgb_maps(p)[100:] for p in rgb_paths]
             self.depth_seqs = [load_depth_maps(p)[100:] for p in depth_paths]
+            self.dms = np.memmap(os.path.join(baseDir, 'mlresults', '1_mask.bin'),
+                            dtype=np.bool, mode='r', shape=(4, 5300, 480, 640))
 
 
         cam_list = ['840412062035','840412062037','840412062038','840412062076']
         self.cam_list = cam_list
-        cam_list.sort()
-        print('cam_list', cam_list)
+        cam_list.sort() 
         camera, camera_pose = [], []
         for camera_ser in cam_list:
             camera.append(CameraIntrinsics[camera_ser])
@@ -74,6 +77,9 @@ class MultiviewDatasetDemo():
             with open(os.path.join(self.baseDir,self.date+'manoParam.pkl'), 'rb') as f:
                 self.manoparam = pickle.load(f)
 
+    def getCameraIntrinsic(self,iv):
+        cam_list = ['840412062035', '840412062037', '840412062038', '840412062076']
+        return self.camera[cam_list[iv]]
     def getCameraPose(self):
         calib_path = os.path.join(baseDir, 'calib.pkl')
         with open(calib_path, 'rb') as f:
@@ -85,12 +91,14 @@ class MultiviewDatasetDemo():
         return camera_pose
 
     def saveRGB(self,idx):
+        assert self.readNotFromBinary==False,"should save from raw data"
         rgbpath=os.path.join(self.baseDir,'rgb')
         if not os.path.exists(rgbpath):os.mkdir(rgbpath)
         #cv2.imwrite(os.path.join(rgbpath,str(idx)+'.png'), self.getImgs(idx), [cv2.IMWRITE_PNG_COMPRESSION, 0])
         for iv in range(4):
             cv2.imwrite(os.path.join(rgbpath,"%05d" % (idx)+'_'+str(iv)+'.jpg'), self.getImgs(idx,uselist=True)[iv])
-    def saveDepth(self,idx):
+    def saveDepth(self,idx,test=False):
+        assert self.readNotFromBinary == False, "should save from raw data"
         dpath=os.path.join(self.baseDir,'depth')
         if not os.path.exists(dpath):os.mkdir(dpath)
         for iv in range(4):
@@ -101,16 +109,17 @@ class MultiviewDatasetDemo():
             path=os.path.join(dpath, "%05d" % (idx) + '_' + str(iv) + '.png')
             d[:,:,0],d[:,:,1]=cur[:,:,0]%256,cur[:,:,0]//256
             cv2.imwrite(path, d, [cv2.IMWRITE_PNG_COMPRESSION, 10])
-            # cv2.imshow("d",d)
-            # print(d)
-            # d2=self.decodeDepth(cv2.imread(path))
-            # print("---------")
-            # print(d2)
-            # cv2.imshow("d2",visualize_better_qulity_depth_map(d2.reshape(*(d2.shape),1)))
-            # cv2.waitKey(0)
+            if(test):
+                cv2.imshow("d",d)
+                print(d)
+                d2=self.decodeDepth(cv2.imread(path))
+                print("---------")
+                print(d2)
+                cv2.imshow("d2",visualize_better_qulity_depth_map(d2.reshape(*(d2.shape),1)))
+                cv2.waitKey(0)
 
     def readRGB(self,idx,iv):
-        if(self.readIndividual):
+        if(self.readNotFromBinary):
             rgbpath = os.path.join(self.baseDir, 'rgb')
             rgbpath = os.path.join(rgbpath, "%05d" % (idx) + '_' + str(iv) + '.jpg')
             return cv2.imread(rgbpath)
@@ -124,7 +133,7 @@ class MultiviewDatasetDemo():
         return depth
 
     def readDepth(self,idx,iv):
-        if (self.readIndividual):
+        if (self.readNotFromBinary):
             dpath = os.path.join(self.baseDir, 'depth')
             dpath = os.path.join(dpath, "%05d" % (idx) + '_' + str(iv) + '.jpg')
             return self.decodeDepth(cv2.imread(dpath))
@@ -144,14 +153,25 @@ class MultiviewDatasetDemo():
         return np.hstack(color)
     def getImgsList(self,idx,facemask=True):
         color=[]
-        facelist = [[], [], [(250, 0, 424, 100)], [(436, 0, 640, 200)]]
+        if(self.date=='7-14-1-2'):
+            facelist = [[], [], [(250, 0, 424, 100)], [(436, 0, 640, 200)]]
+        elif(self.date=='9-10-1-2'):
+            facelist = [[],[],[],[(260,144,403,287)]]
+        elif(self.date=='9-17-1-2'):
+            facelist = [[],[(488,216,640,480)],[],[]]
+        elif(self.date=='9-25-1-2'):
+            facelist = [[],[(475,317,640,480),(133,98,286,279)],[],[(470,250,640,480)]]
+        else:assert (False),"no other valid dataset"
         for iv in range(4):
             img=self.readRGB(idx,iv)
-            if facemask and self.readIndividual==False:
+            if facemask and self.readNotFromBinary==False:
+                mask = self.dms[iv][idx].copy()
+                kernel = np.ones((17, 17), np.uint8)
+                mask = cv2.dilate(mask.astype(np.uint8), kernel, iterations=1).astype(np.bool)
                 for (x, y, x1, y1) in facelist[iv]:
                     mask2 = np.zeros_like(img).astype(np.bool)
                     mask2[y:y1, x:x1, :] = True
-                    # mask2[mask, :] = False
+                    mask2[mask, :] = False
                     rgbcopy = img.copy()
                     img = cv2.blur(img, (40, 40))
                     img[mask2 == False] = rgbcopy[mask2 == False]
@@ -365,6 +385,8 @@ class MultiviewDatasetDemo():
         ujoints=self.joints4view[iv,idx,:21,:3,0].copy()
         rgbuvd = perspective_projection(ujoints[5], self.camera[iv]).astype(int)[:2]
         return rgbuvd.reshape(-1).astype(int)[:2]
+
+
 
     def drawPose4view(self,idx,view=4):
         assert (view == 1 or view == 4), "only support 4 and 1 view"

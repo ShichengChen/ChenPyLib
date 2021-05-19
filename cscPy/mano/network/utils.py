@@ -238,6 +238,22 @@ def rotate2joint(wrist_trans,local_trans,template,parent):
 
     return newjs[:,:,:-1].reshape(N,21,3)
 
+def getHardWeightCoeff(weight):
+    weight_coeff = weight[0].permute(1, 0).reshape(16, 778)
+    weight_idx = torch.argmax(weight_coeff, dim=0)
+    weight_coeff_hard = torch.zeros_like(weight_coeff, device=weight_coeff.device)
+    for i in range(weight_coeff.shape[0]):
+        weight_coeff_hard[i][weight_idx == i] = 1
+    assert torch.sum(torch.abs(torch.sum(weight_coeff_hard, dim=0) - 1) < 0.001), "invalid weight coeff hard"
+    return torch.tensor(weight_coeff_hard)
+def getOriWeightCoeff(weight):
+    return weight[0].permute(1, 0).reshape(16, 778)
+
+def getUsefulWeightCoeff(weight):
+    weight_coeff = weight[0].permute(1, 0).reshape(16, 778)
+    for i in range(16):
+        weight_coeff[i][weight_coeff[i]<0.8]=0
+    return weight_coeff
 
 def wristRotTorch(tempJ,joint_gt):
     N=tempJ.shape[0]
@@ -277,6 +293,39 @@ def wristRot(tempJ,joint_gt):
     pl1 = joint_gt[4] - joint_gt[0]
     r2 = getRotationBetweenTwoVector(pl0, pl1)
     return r2 @ r
+
+def getRotationBetweenTwoMeshBone(a,b,weight,rt=False):
+    N,n,d=a.shape[0],a.shape[1],a.shape[2]
+    assert n==778,"check number of vertces"
+    trw=torch.diag(weight).repeat(N,1,1).reshape(N,n,n)
+    weight=weight.reshape(778)
+    if(rt==False):
+        w=(a.permute(0,2,1))@trw@b
+        w=w.cpu()
+        u, _, v = w.svd()
+        s = v.reshape(N,3,3)@(u.reshape(N,3,3).permute(0,2,1))
+        s = torch.det(s)
+        s = torch.tensor([[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, s]])
+        r = v.reshape(N,3,3)@s@(u.reshape(N,3,3).permute(0,2,1))
+        r=r.to(a.device)
+        return r
+    else:
+        aave=(torch.sum(a*weight.reshape(1,n,1),dim=1).reshape(N,d)/torch.sum(weight).reshape(1,1)).reshape(N,1,d)
+        bave=(torch.sum(b*weight.reshape(1,n,1),dim=1).reshape(N,d)/torch.sum(weight).reshape(1,1)).reshape(N,1,d)
+        x=(a-aave).reshape(N,n,d)
+        y=(b-bave).reshape(N,n,d)
+        w = (x.permute(0,2,1)) @ trw @ y
+        w = w.cpu()
+        u, _, v = w.svd()
+        s = v.reshape(N,3,3)@u.reshape(N,3,3).permute(0,2,1)
+        s = torch.det(s)
+        s = torch.tensor([[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, s]])
+        r = v.reshape(N,3,3)@s@(u.reshape(N,3,3).permute(0,2,1))
+        #print(r.shape)
+        r = r.to(a.device).reshape(N,3,3)
+        t=aave-bave@r
+        return r,t
+
 
 def getRotationBetweenTwoVector(a,b):
     if(torch.is_tensor(a)):
@@ -321,8 +370,40 @@ def getRotationBetweenTwoVector(a,b):
 
 
 if __name__ == "__main__":
-    a=getRotationBetweenTwoVector(torch.tensor([[0,1,0]],dtype=torch.float32),
-                                  torch.tensor([[1,0,0]],dtype=torch.float32))
-    b=getRotationBetweenTwoVector(torch.tensor([[1,0,0]],dtype=torch.float32),
-                                  torch.tensor([[0,1,0]],dtype=torch.float32))
-    print(a,b)
+    # a=getRotationBetweenTwoVector(torch.tensor([[0,1,0]],dtype=torch.float32),
+    #                               torch.tensor([[1,0,0]],dtype=torch.float32))
+    # b=getRotationBetweenTwoVector(torch.tensor([[1,0,0]],dtype=torch.float32),
+    #                               torch.tensor([[0,1,0]],dtype=torch.float32))
+    # print(a,b)
+
+
+    class Solution(object):
+        import numpy as np
+
+        def __init__(self, radius, x_center, y_center):
+            """
+            :type radius: float
+            :type x_center: float
+            :type y_center: float
+            """
+            self.r=radius
+            self.x=np.array([x_center,y_center])
+
+        def randPoint(self):
+            """
+            :rtype: List[float]
+            """
+            theta=np.random.uniform(0,2*np.pi)
+            l=np.random.uniform(0,self.r)
+            rot=np.array([[np.cos(theta),-np.sin(theta)],[np.sin(theta),np.cos(theta)]])
+            return (self.x+rot.dot(np.array([l,0]))).tolist()
+
+    a=Solution(1,0,0)
+    print(a.randPoint())
+    print(a.randPoint())
+    print(a.randPoint())
+    print(a.randPoint())
+
+
+            # return np.array([1, 2]).tolist()
+

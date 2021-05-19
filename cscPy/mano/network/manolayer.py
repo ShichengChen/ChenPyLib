@@ -2,8 +2,6 @@ import pickle
 
 import torch.nn as nn
 import torchgeometry as tgm
-import torch
-import torch.functional as F
 
 
 class ContinousRotReprDecoder(nn.Module):
@@ -159,12 +157,12 @@ class VPoser(nn.Module):
 # joint mapping indices from mano to bighand
 mano2bighand_skeidx = [0, 13, 1, 4, 10, 7, 14, 15, 16, 2, 3, 17, 5, 6, 18, 11, 12, 19, 8, 9, 20]
 
-from cscPy.mano.network.utils import *
+from utils import *
 
 class MANO_SMPL(nn.Module):
-    def __init__(self, mano_pkl_path, ncomps = 10, flat_hand_mean=False,cuda=True,bighandorder=False,device='cuda'):
+    def __init__(self, mano_pkl_path, ncomps = 10, flat_hand_mean=False,cuda=True,oriorder=False,device='cuda'):
         super(MANO_SMPL, self).__init__()
-        self.bighandorder=bighandorder
+        self.oriorder=oriorder
         # Load the MANO_RIGHT.pkl
         with open(mano_pkl_path, 'rb') as f:
             model = pickle.load(f, encoding='latin1')
@@ -297,6 +295,10 @@ class MANO_SMPL(nn.Module):
         if(zero_wrist):J-=J[:,0:1,:].clone()
         return J
 
+
+
+
+
     def forward(self, beta, theta, wrist_euler, pose_type, get_skin=False,external_transition=None):
         assert pose_type in ['pca', 'euler', 'rot_matrix'], print('The type of pose input should be pca, euler or rot_matrix')
         num_batch = beta.shape[0]
@@ -386,7 +388,7 @@ class MANO_SMPL(nn.Module):
         #
         if pose_type == 'pca':
             pose = pose.clamp(-2.,2.)
-        shape = shape.clamp(-0.03, 0.03)
+            #shape = shape.clamp(-0.03, 0.03)
 
         verts, joints, Rs = self.forward(shape, pose, wrist_euler, pose_type, get_skin=True,external_transition=external_transition)
 
@@ -398,11 +400,10 @@ class MANO_SMPL(nn.Module):
         joints = scale * joints
         joints = trans + joints
 
-        if(self.bighandorder):
-            joints = joints[:, mano2bighand_skeidx, :]
+        if(self.oriorder==False):joints = joints[:, mano2bighand_skeidx, :]
 
         # mmcp is 3th joint in bighand order
-        if mmcp_center and self.bighandorder:
+        if mmcp_center:
             mmcp = joints[:, 3, :].clone().unsqueeze(1)
             verts -= mmcp
             joints -= mmcp
@@ -461,19 +462,19 @@ class MANO_SMPL(nn.Module):
 
         A0 = make_A(root_rotation, Js[:, 0])
         results = [A0]
-        #newjs=JsAll.clone().reshape(N,21,3)
+        newjs=JsAll.clone().reshape(N,21,3)
 
-        #newjsones=torch.ones([N,21,1])
-        #newjs=torch.cat([newjs,newjsones],dim=2).reshape(N,21,4,1)
-        #orijs = newjs.clone().reshape(N,21,4)
-        # transidx=[2,3,17,   5, 6, 18,    8, 9, 20,    11, 12, 19,   14, 15, 16]
-        # transpdx=[1,2,3,    4, 5, 6,     7, 8, 9,     10, 11, 12,   13, 14, 15]
+        newjsones=torch.ones([N,21,1]).to(Rs.device)
+        newjs=torch.cat([newjs,newjsones],dim=2).reshape(N,21,4,1)
+        orijs = newjs.clone().reshape(N,21,4)
+        transidx=[2,3,17,   5, 6, 18,    8, 9, 20,    11, 12, 19,   14, 15, 16]
+        transpdx=[1,2,3,    4, 5, 6,     7, 8, 9,     10, 11, 12,   13, 14, 15]
         #manopdx=[1,2,3,   4,5, 6,    7,8, 9,    10,11, 12,   13,14, 15]
         #parent: 012 045 078 01011 01314
-        #cpidx=[1,4,7,10,13]
-        #for i in range(len(cpidx)):
-            #a=minusHomoVectors(orijs[:, cpidx[i]],orijs[:, 0]).reshape(N,4,1)
-            #newjs[:,cpidx[i]]=(A0@a)
+        cpidx=[1,4,7,10,13]
+        for i in range(len(cpidx)):
+            a=minusHomoVectors(orijs[:, cpidx[i]],orijs[:, 0]).reshape(N,4,1)
+            newjs[:,cpidx[i]]=(A0@a)
 
 
         for i in range(1, parent.shape[0]):
@@ -481,17 +482,16 @@ class MANO_SMPL(nn.Module):
             A_here = make_A(Rs[:, i], j_here)
             res_here = torch.matmul(results[parent[i]], A_here)
 
-            #a = minusHomoVectors(orijs[:,transidx[i-1]], orijs[:,transpdx[i-1]]).reshape(N,4,1)
-            #newjs[:,transidx[i-1]]=(res_here@a)
+            a = minusHomoVectors(orijs[:,transidx[i-1]], orijs[:,transpdx[i-1]]).reshape(N,4,1)
+            newjs[:,transidx[i-1]]=(res_here@a)
             results.append(res_here)
 
-        #self.newjs=newjs
+        self.newjs=newjs
         results = torch.stack(results, dim=1)
 
         new_J = results[:, :, :3, 3] #did not use later
         ones_homo = Variable(torch.zeros(N, 16, 1, 1))
-        if self.is_cuda:
-            ones_homo = ones_homo.cuda()
+        if self.is_cuda:ones_homo = ones_homo.cuda()
         Js_w0 = torch.cat([Js, ones_homo], dim=2)
         init_bone = torch.matmul(results, Js_w0)
         init_bone = F.pad(init_bone, [3, 0, 0, 0, 0, 0, 0, 0])
@@ -535,15 +535,15 @@ class MANO_SMPL(nn.Module):
         for finger in jidx:
             angleThreshold=[3.14/(2*12),3.14/(2*6)]
             for i in range(1,3):
-                print('finger i',finger,i)
+                #print('finger i',finger,i)
                 a0,a1,a2=joint_gt[:,finger[i]],joint_gt[:,finger[i+1]],joint_gt[:,finger[i+2]].reshape(N,3)
                 a,b=unit_vector(a1-a0),unit_vector(a2-a1)
                 fingernorm=unit_vector(torch.cross(a,b,dim=1))
                 sign=torch.sum(fingernorm*stdFingerNorm,dim=1).reshape(N)
-                print('sign',sign)
+                #print('sign',sign)
                 angle = torch.acos(torch.sum(a * b, dim=1))
                 loss += torch.sum((sign < 0) & (torch.abs(angle) > angleThreshold[i - 1]))
-                print('loss', (sign < 0) & (torch.abs(angle) > angleThreshold[i - 1]))
+                #print('loss', (sign < 0) & (torch.abs(angle) > angleThreshold[i - 1]))
         return joint_gt,loss
 
 
@@ -703,6 +703,170 @@ class MANO_SMPL(nn.Module):
         if(restrainFingerDOF==3):
             return wrist_trans, local_trans, outjoints,loss
         return wrist_trans,local_trans,outjoints
+
+
+    def matchTemplate2VerticesGreedy(self,vertices_gt:np.ndarray,tempJ=None,tempV=None):
+        N = vertices_gt.shape[0]
+        vertices_gt = vertices_gt.reshape(N, 778, 3)
+        if (not torch.is_tensor(vertices_gt)):
+            vertices_gt = torch.tensor(vertices_gt, device='cpu', dtype=torch.float32)
+        device = vertices_gt.device
+
+        # first make wrist to zero
+        # orijoint_gt = joint_gt.clone()
+        # oriWrist = orijoint_gt[:, 0:1, :].clone()
+        # joint_gt = joint_gt - oriWrist.clone()
+
+
+        transformG = torch.eye(4, dtype=torch.float32, device=device).reshape(1, 1, 4, 4).repeat(N, 16, 1,
+                                                                                                 1).reshape(N,
+                                                                                                            16, 4, 4)
+        transformL = torch.eye(4, dtype=torch.float32, device=device).reshape(1, 1, 4, 4).repeat(N, 16, 1,
+                                                                                                 1).reshape(N,
+                                                                                                            16, 4, 4)
+        transformLmano = torch.eye(4, dtype=torch.float32, device=device).reshape(1, 1, 4, 4).repeat(N, 16, 1,
+                                                                                                 1).reshape(N,
+                                                                                                            16, 4, 4)
+
+        weight_coeff=getHardWeightCoeff(self.weight)
+
+        if(tempV is None):
+            tempV = self.v_template.reshape(1, 778, 3).clone().repeat(N, 1, 1).reshape(N, 778, 3).to(device)
+            tempJ = self.bJ.reshape(1, 21, 3).clone().repeat(N, 1, 1).reshape(N, 21, 3).to(device)
+        else:
+            #print("use external template")
+            if(not torch.is_tensor(tempV)):tempV=torch.tensor(tempV,dtype=torch.float32,device=device)
+            if(len(tempV.shape)==3):
+                tempV=tempV.reshape(N, 778, 3)
+            else:
+                tempV = tempV.reshape(1, 778, 3).clone().repeat(N, 1, 1).reshape(N, 778, 3)
+
+
+        tempJori = tempJ.clone()
+        R,t = getRotationBetweenTwoMeshBone(tempV, vertices_gt,weight_coeff[0],rt=True)
+        transformG[:, 0, :3, :3] = R
+        transformL[:, 0, :3, :3] = R
+        transformLmano[:, 0, :3, :3] = R
+        transformG[:, 0, :3, 3] = t
+        transformL[:, 0, :3, 3] = t
+        transformLmano[:, 0, :3, 3] = t
+
+        #assert (torch.sum(vertices_gt[:,0]-tempJ[:,0])<1e-5),"wrist joint should be same!"
+
+        childern = [[1, 2, 3, 17, 4, 5, 6, 18, 7, 8, 9, 20, 10, 11, 12, 19, 13, 14, 15, 16],
+                    [2, 3, 17], [3, 17], [17],
+                    [5, 6, 18], [6, 18], [18],
+                    [8, 9, 20], [9, 20], [20],
+                    [11, 12, 19], [12, 19], [19],
+                    [14, 15, 16], [15, 16], [16]]
+        bonelist= [[1,2,3],[2,3],[3],
+                   [4,5,6],[5,6],[6],
+                   [7, 8, 9], [8, 9], [9],
+                   [10, 11, 12], [11, 12], [12],
+                   [13, 14, 15], [14, 15], [15],
+                   ]#for idx index, start from finger instead from wrist
+
+        for child in childern[0]:
+            t1 = (tempJ[:,child] - tempJ[:,0]).reshape(N,3,1)
+            tempJ[:,child] = (transformL[:,0] @ getHomo3D(t1)).reshape(N,4,1)[:,:-1,0]
+
+        tempV=(transformL[:,0].reshape(N,4,4)@getHomo3D(tempV).reshape(N,778,4,1))[:,:,:-1,0]
+
+        manoidx = [2, 3, 17, 5, 6, 18, 8, 9, 20, 11, 12, 19, 14, 15, 16]
+        manopdx = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15]
+        manoppx = [0, 1, 2, 0, 4, 5, 0, 7, 8, 0, 10, 11, 0, 13, 14]
+        jidx = [[0], [1, 2, 3, 17], [4, 5, 6, 18], [10, 11, 12, 19], [7, 8, 9, 20], [13, 14, 15, 16]]
+        for idx, i in enumerate(manoidx):
+            pi = manopdx[idx]
+            #v0 = (tempJ[:, i] - tempJ[:, pi]).reshape(N, 3)
+
+            tr = torch.eye(4, dtype=torch.float32,device=device).reshape(1, 4, 4).repeat(N,1,1)
+            #print(tempV.shape,vertices_gt.shape,weight_coeff[pi].shape)
+            #print(np.arange(778)[weight_coeff[pi]>.9])
+            r,t = getRotationBetweenTwoMeshBone(tempV, vertices_gt,weight_coeff[pi].clone(),rt=True)
+            pret = (tempJ[:, pi]).reshape(N, 1,3)
+            tempV, vertices_gt = tempV - pret, vertices_gt - pret
+            r0 = getRotationBetweenTwoMeshBone(tempV, vertices_gt,weight_coeff[pi].clone())
+            tempV, vertices_gt = tempV + pret, vertices_gt + pret
+            r1 = getRotationBetweenTwoMeshBone(tempV, vertices_gt, weight_coeff[pi].clone())
+            print(r,r0,r1)
+            tr[:,:3, :3] = r
+            #print(r0,r)
+            t0 = (tempJ[:,pi]).reshape(N,3)
+            tr[:,:-1, -1] = t0
+
+
+            transformL[:,idx + 1] = tr
+            Gp = transformG[:,self.parents[idx + 1]].reshape(N,4,4)
+            transformG[:,idx + 1] = transformL[:,idx + 1] @ Gp
+            transformLmano[:,idx + 1] = torch.inverse(Gp) @ transformL[:,idx + 1] @ Gp
+
+            for child in childern[pi]:
+                t1 = (tempJ[:,child] - tempJ[:,pi]).reshape(N,3,1)
+                tempJ[:,child] = (transformL[:,idx + 1] @ getHomo3D(t1)).reshape(N,4,1)[:,:-1,0]
+
+            curweight=torch.sum(weight_coeff[bonelist[idx]],dim=0).reshape(N,778,1,1)
+            curidx=(torch.sum(weight_coeff[bonelist[idx]],dim=0).reshape(N,778)>0.7)
+            tempV[curidx] = (r.reshape(N, 3, 3) @ (tempV.reshape(N, 778, 3, 1)*curweight))[:, :, :, 0][curidx]
+
+
+        local_trans = transformLmano[:, 1:, :3, :3].reshape(N, 15, 3, 3)
+        wrist_trans = transformLmano[:, 0, :3, :3].reshape(N, 1, 3, 3)
+
+        outjoints = rotate2joint(wrist_trans, local_trans, tempJori, self.parents).reshape(N,21,3)
+        assert (torch.mean(torch.sqrt(torch.sum((outjoints-tempJ)**2,dim=2)))<2),"outjoints and tempJ epe should be small"+str(torch.mean(torch.sqrt(torch.sum((outjoints - tempJ) ** 2, dim=2))))
+        #print(torch.mean(torch.sqrt(torch.sum((outjoints - tempJ) ** 2, dim=2))))
+
+
+        return wrist_trans,local_trans,outjoints
+
+
+    def matchTemplate2Vertices(self,vertices_gt,tempV=None,tempJ=None):
+        device=vertices_gt.device
+        N=vertices_gt.shape[0]
+        vertices_gt = vertices_gt.reshape(N,778, 3)
+        if (not torch.is_tensor(vertices_gt)):
+            vertices_gt = torch.tensor(vertices_gt,device=device,dtype=torch.float32)
+        N = vertices_gt.shape[0]
+        transformG = torch.eye(4, dtype=torch.float32,device=device).reshape(1,1, 4, 4).repeat(N,16,1,1).reshape(N,16, 4, 4)
+        transformL = torch.eye(4, dtype=torch.float32,device=device).reshape(1,1, 4, 4).repeat(N,16,1,1).reshape(N,16, 4, 4)
+
+        weight_coeff=getUsefulWeightCoeff(self.weight.clone())
+        #weight_coeff=getHardWeightCoeff(self.weight.clone())
+        #weight_coeff=getOriWeightCoeff(self.weight.clone())
+
+        if (tempV is None):
+            tempV = self.v_template.reshape(1, 778, 3).clone().repeat(N, 1, 1).reshape(N, 778, 3).to(device)
+            tempJ = self.bJ.reshape(1, 21, 3).clone().repeat(N, 1, 1).reshape(N, 21, 3).to(device)
+        else:
+            if (not torch.is_tensor(tempV)): tempV = torch.tensor(tempV, dtype=torch.float32, device=device)
+            if (len(tempV.shape) == 3):
+                tempV = tempV.reshape(N, 778, 3)
+            else:
+                tempV = tempV.reshape(1, 778, 3).clone().repeat(N, 1, 1).reshape(N, 778, 3)
+        R,t=getRotationBetweenTwoMeshBone(tempV,vertices_gt,weight_coeff[0],rt=True)
+        transformG[:,0,:3,:3],transformL[:,0,:3,:3],transformG[:, 0, :3, 3],transformL[:, 0, :3, 3] = R,R,t,t
+
+        manoidx = [2, 3, 17, 5, 6, 18, 8, 9, 20, 11, 12, 19, 14, 15, 16]
+        manopdx = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15]
+        for idx, i in enumerate(manoidx):
+            pi = manopdx[idx]
+
+            tr = torch.eye(4, dtype=torch.float32,device=device).reshape(1, 4, 4).repeat(N,1,1)
+            r,t = getRotationBetweenTwoMeshBone(tempV, vertices_gt,weight_coeff[pi],rt=True)
+            tr[:,:3, :3],tr[:,:3,3]=r,t
+
+            invp = torch.inverse(transformG[:,self.parents[idx + 1]])
+            transformG[:,idx + 1] = tr.clone().reshape(N,4,4)
+            local = invp @ tr
+
+            transformL[:,idx + 1] = local.clone().reshape(N,4,4)
+
+        local_trans = transformL[:,1:, :3, :3].reshape(N,15,3,3)
+        wrist_trans = transformL[:,0, :3, :3].reshape(N,1,3,3)
+
+        outjoints=rotate2joint(wrist_trans,local_trans,tempJ,self.parents)
+        return wrist_trans,local_trans,outjoints.reshape(N,21,3)
 
 
 
