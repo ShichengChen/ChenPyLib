@@ -10,7 +10,8 @@ import pickle
 import os
 from torch.utils.data import Dataset
 from cscPy.mano.network.utils import *
-from cscPy.mano.network.manolayer import VPoser,MANO_SMPL
+from cscPy.mano.network.manolayer import MANO_SMPL
+from cscPy.mano.network.net import VPoser
 import tqdm
 
 

@@ -2,41 +2,13 @@ import numpy as np
 import torch
 import torch.nn.functional as F
 from torch.autograd import Variable
+from cscPy.mano.network.utilsSmallFunctions import *
 STB2Bighand_skeidx = [0, 17, 13, 9, 5, 1, 18, 19, 20, 14, 15, 16, 10, 11, 12, 6, 7, 8, 2, 3, 4]
 Bighand2mano_skeidx = [0, 2, 9, 10, 3, 12, 13, 5, 18, 19, 4, 15, 16, 1, 6, 7, 8, 11, 14, 17, 20]
 RHD2Bighand_skeidx = [0,4,8,12,16,20,3,2,1,7,6,5,11,10,9,15,14,13,19,18,17]
 SynthHands2Bighand_skeidx=[0,1,5,9,13,17,2,6,10,14,18,3,7,11,15,19,4,8,12,16,20]
 
-def minusHomoVectors(v0, v1):
-    v = v0 - v1
-    if (v.shape[-1] == 1):
-        v[..., -1, 0] = 1
-    else:
-        v[..., -1] = 1
-    return v
 
-def getRtMatrix2D(theta,x=0,y=0):
-    return np.array([[np.cos(theta), -np.sin(theta),x],
-                     [np.sin(theta), np.cos(theta),y],
-                     [0,0,1]])
-
-def comebineRt3D(r,t):
-    return np.array([[r[0,0], r[0,1],r[0,2],t[0]],
-                     [r[1,0], r[1,1],r[1,2],t[1]],
-                     [r[2,0], r[2,1],r[2,2],t[2]],
-                     [0,0,0,1]])
-
-
-def getTransitionMatrix2D(x=0,y=0):
-    return np.array([[1, 0,x],[0, 1,y],[0,0,1]])
-
-def getInhomogeneousLine(lines:np.ndarray):
-    l=lines.copy()
-    l=l.reshape(-1,l.shape[-1])[:,:-1]
-    return l
-
-def get32fTensor(a):
-    return torch.tensor(a,dtype=torch.float32)
 
 
 def getBoneLen(joints_gt):
@@ -182,14 +154,6 @@ def getRotationMatrix3D(thetax,thetay,thetaz):
     rz=AxisRotMat(thetaz,[0,0,1])
     return rx@ry@rz
 
-
-def unit_vector(vec):
-    if(torch.is_tensor(vec)):
-        bs=vec.shape[0]
-        vec=vec.reshape(bs,3)
-        return vec / (torch.norm(vec,dim=1,keepdim=True)+1e-8)
-    return vec / (np.linalg.norm(vec)+1e-8)
-
 def angle_between(v1, v2):
     v1_u = unit_vector(v1)
     v2_u = unit_vector(v2)
@@ -248,82 +212,158 @@ def getHardWeightCoeff(weight):
     return torch.tensor(weight_coeff_hard)
 def getOriWeightCoeff(weight):
     return weight[0].permute(1, 0).reshape(16, 778)
-
 def getUsefulWeightCoeff(weight):
     weight_coeff = weight[0].permute(1, 0).reshape(16, 778)
     for i in range(16):
         weight_coeff[i][weight_coeff[i]<0.8]=0
     return weight_coeff
+def getPortionWeightCoeff(weight):
+    weight_coeff = weight[0].permute(1, 0).reshape(16, 778)
+    for i in range(16):
+        l=torch.sum(weight_coeff[i]>0)//4
+        arg=torch.argsort(weight_coeff[i])
+        weight_coeff[i][arg[:-l]]=0
+    return weight_coeff
 
-def wristRotTorch(tempJ,joint_gt):
-    N=tempJ.shape[0]
-    palm0 = torch.cross(tempJ[:, 4] - tempJ[:, 0], tempJ[:, 7] - tempJ[:, 4], dim=1)
-    palm1 = torch.cross(joint_gt[:, 4] - joint_gt[:, 0], joint_gt[:, 7] - joint_gt[:, 4], dim=1)
-    r = getRotationBetweenTwoVector(palm0, palm1)
-    pl0 = r @ (tempJ[:, 4] - tempJ[:, 0]).reshape(N, 3, 1)
+def planeAlignment(temp0,temp1,targetd0,targetd1):
+    N=temp0.shape[0]
+    r = getRotationBetweenTwoVector(temp0, targetd0)
+    pl0 = r @ temp1.reshape(N, 3, 1)
     pl0 = pl0.reshape(N, 3)
-    pl1 = joint_gt[:, 4] - joint_gt[:, 0]
+    pl1 = targetd1
     pl1 = pl1.reshape(N, 3)
     r2 = getRotationBetweenTwoVector(pl0, pl1)
     return r2@r
 
-def wristRot(tempJ,joint_gt):
-    # pal=np.array([unit_vector(tempJ[1]-tempJ[0]),
-    #               unit_vector(tempJ[4]-tempJ[0]),
-    #               # unit_vector(tempJ[7] - tempJ[0]),
-    #               # unit_vector(tempJ[10] - tempJ[0]),
-    #               unit_vector(tempJ[7] - tempJ[1]),
-    #               unit_vector(tempJ[10] - tempJ[4]),])
-    # U, S, Vh = np.linalg.svd(pal)
-    # palm0 = Vh[-1]
-    #
-    # pal = np.array([unit_vector(joint_gt[1] - joint_gt[0]),
-    #                 unit_vector(joint_gt[4] - joint_gt[0]),
-    #                 # unit_vector(joint_gt[7] - joint_gt[0]),
-    #                 # unit_vector(joint_gt[10] - joint_gt[0]),
-    #                 unit_vector(joint_gt[7] - joint_gt[1]),
-    #                 unit_vector(joint_gt[10] - joint_gt[4]),])
-    # U, S, Vh = np.linalg.svd(pal)
-    # palm1 = Vh[-1]
+def wristRotTorch(tempJ,joint_gt):
+    isnumpy=False
+    if(not torch.is_tensor(tempJ)):
+        isnumpy=True
+        tempJ,joint_gt=get32fTensor(tempJ).reshape(1,21,3),get32fTensor(joint_gt).reshape(1,21,3)
+    N=tempJ.shape[0]
+    ##assume norm of palm is z direction
+    ##wirst to mmcp is y direction
+    z0 = torch.cross(tempJ[:, 4] - tempJ[:, 0], tempJ[:, 7] - tempJ[:, 4], dim=1)
+    z1 = torch.cross(joint_gt[:, 4] - joint_gt[:, 0], joint_gt[:, 7] - joint_gt[:, 4], dim=1)
+    y0 = (tempJ[:, 4] - tempJ[:, 0]).reshape(N, 3, 1)
+    y1 = (joint_gt[:, 4] - joint_gt[:, 0])
+    r=planeAlignment(z0,y0,z1,y1)
+    if isnumpy:return r.reshape(3,3).numpy()
+    return r
 
-    palm0 = np.cross(tempJ[4] - tempJ[0], tempJ[7] - tempJ[4])
-    palm1 = np.cross(joint_gt[4] - joint_gt[0], joint_gt[7] - joint_gt[4])
-    r = getRotationBetweenTwoVector(palm0.copy(), palm1.copy())
-    pl0 = r @ (tempJ[4] - tempJ[0])
-    pl1 = joint_gt[4] - joint_gt[0]
-    r2 = getRotationBetweenTwoVector(pl0, pl1)
-    return r2 @ r
 
-def getRotationBetweenTwoMeshBone(a,b,weight,rt=False):
+def svdForRotation(a,weight,b):
     N,n,d=a.shape[0],a.shape[1],a.shape[2]
-    assert n==778,"check number of vertces"
-    trw=torch.diag(weight).repeat(N,1,1).reshape(N,n,n)
-    weight=weight.reshape(778)
+    #weight[(0<weight) & (weight<1)]=1
+    trw = torch.diag(weight).repeat(N, 1, 1).reshape(N, n, n)
+    w = (a.permute(0, 2, 1)) @ trw @ b
+    w = w.cpu()
+    u, _, v = w.svd()
+    s = v.reshape(N, 3, 3) @ (u.reshape(N, 3, 3).permute(0, 2, 1))
+    s = torch.det(s)
+    s = torch.tensor([[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, s]])
+    r = v.reshape(N, 3, 3) @ s @ (u.reshape(N, 3, 3).permute(0, 2, 1))
+    r = r.to(a.device).reshape(N,3,3)
+    return r
+def svdForRotationWithoutW(a,b):
+    N,n,d=a.shape[0],a.shape[1],a.shape[2]
+    w = (a.permute(0, 2, 1)) @ b
+    w = w.cpu()
+    u, _, v = w.svd()
+    s = v.reshape(N, d, d) @ (u.reshape(N, d, d).permute(0, 2, 1))
+    s = torch.det(s)
+    s = torch.tensor([[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, s]])
+    r = v.reshape(N, d, d) @ s @ (u.reshape(N, d, d).permute(0, 2, 1))
+    r = r.to(a.device).reshape(N,3,3)
+    return r
+
+def lstsqForR(a,weight,b):
+    #here R maybe not real r
+    N=a.shape[0]
+    r=torch.zeros((N,3,3),dtype=a.dtype,device=a.device)
+    x,y=a[:,weight>0],b[:,weight>0]
+    for i in range(N):
+        X, _ = torch.lstsq(x[i], y[i])
+        r[i]=X[:3,:3].clone()
+    return r
+def icp(coords, coords_ref, n_iter):
+    """
+    Iterative Closest Point
+    """
+    for t in range(n_iter):
+        cdist = torch.cdist(coords - coords.mean(dim=0),
+                            coords_ref - coords_ref.mean(dim=0))
+        mindists, argmins = torch.min(cdist, dim=1)
+        print(argmins)
+        print(coords_ref[argmins].shape)
+        print(coords_ref[argmins])
+        X, _ = torch.lstsq(coords_ref[argmins].contiguous(), coords)
+        coords = coords.mm(X[:3])
+        rmsd = torch.sqrt((X[3:]**2).sum(dim=1).mean())
+    return coords
+
+def ICP(a,b,mask,root):
+    N, n, d = a.shape[0], a.shape[1], a.shape[2]
+
+    assert (N==1)
+    mask=mask.reshape(n)
+    mask[mask>0]=1
+    mask=mask.long()
+    root=root.reshape(N,1,d)
+    rt=torch.eye(d+1).reshape(1,d+1,d+1).repeat(N,1,1)
+    a,b=a[:,mask],b[:,mask]
+    print(b.shape)
+    a,b=a.clone()-root,b.clone()-root
+    print(-1, 'icp error', torch.mean(torch.sqrt(torch.sum((b - a) ** 2, dim=2))))
+    for iter in range(10):
+        cdist = torch.cdist(a-a.mean(dim=1,keepdim=True),b-b.mean(dim=1,keepdim=True))
+        mindists, argmins = torch.min(cdist, dim=2)
+        print(argmins)
+        #print(argmins)
+        # bat = torch.arange(N).reshape(N, 1).repeat(1, 778).reshape(-1)
+        # print(argmins.shape)
+        # print(b[:,argmins.reshape(-1)].shape)
+        print(b.shape)
+        bb=b[:,argmins.reshape(-1)].contiguous()
+        r,t=getRotationBetweenTwoMeshBone(a.clone(),bb.clone(),None,rt=True,ICP=True)
+        crt=torch.eye(d+1).reshape(1,d+1,d+1).repeat(N,1,1)
+        #print(r.shape,t.shape)
+        crt[:,:d,:d]=r ###omit transition here
+        #print(a.shape,r.shape,t.shape)
+        a=(r@a.reshape(N,n,d,1)).reshape(N,n,d)
+        print(iter,'icp error',torch.mean(torch.sqrt(torch.sum((b-a)**2,dim=2))))
+        rt=crt@rt
+    return rt[:,:d,:d],rt[:,d:,:d]
+
+def getRotationBetweenTwoMeshBone(a,b,weight,rt=False,ICP=False):
+    N,n,d=a.shape[0],a.shape[1],a.shape[2]
+    if(ICP==True):
+        aave,bave=torch.mean(a,dim=1,keepdim=True),torch.mean(b,dim=1,keepdim=True)
+        x = (a - aave).reshape(N, n, d)
+        y = (b - bave).reshape(N, n, d)
+        r = svdForRotationWithoutW(x, y)
+        t = bave - aave @ r
+        return r, t
+    weight=weight.reshape(n)
     if(rt==False):
-        w=(a.permute(0,2,1))@trw@b
-        w=w.cpu()
-        u, _, v = w.svd()
-        s = v.reshape(N,3,3)@(u.reshape(N,3,3).permute(0,2,1))
-        s = torch.det(s)
-        s = torch.tensor([[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, s]])
-        r = v.reshape(N,3,3)@s@(u.reshape(N,3,3).permute(0,2,1))
-        r=r.to(a.device)
+        assert False,"unknown bug here"
+        r=svdForRotation(a,weight,b)
         return r
     else:
         aave=(torch.sum(a*weight.reshape(1,n,1),dim=1).reshape(N,d)/torch.sum(weight).reshape(1,1)).reshape(N,1,d)
         bave=(torch.sum(b*weight.reshape(1,n,1),dim=1).reshape(N,d)/torch.sum(weight).reshape(1,1)).reshape(N,1,d)
         x=(a-aave).reshape(N,n,d)
         y=(b-bave).reshape(N,n,d)
-        w = (x.permute(0,2,1)) @ trw @ y
-        w = w.cpu()
-        u, _, v = w.svd()
-        s = v.reshape(N,3,3)@u.reshape(N,3,3).permute(0,2,1)
-        s = torch.det(s)
-        s = torch.tensor([[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, s]])
-        r = v.reshape(N,3,3)@s@(u.reshape(N,3,3).permute(0,2,1))
-        #print(r.shape)
-        r = r.to(a.device).reshape(N,3,3)
-        t=aave-bave@r
+        r = svdForRotation(x, weight, y)
+        #r = lstsqForR(x,weight,y)
+        t = bave - aave @ r
+        aa = (r @ a.reshape(N, 778, 3, 1) + t.reshape(N, 1, 3, 1)).reshape(N, 778, 3)
+        '''
+        curweight=torch.sum(weight_coeff[bonelist[idx]],dim=0).reshape(N,778,1,1)
+        curidx=(torch.sum(weight_coeff[bonelist[idx]],dim=0).reshape(N,778)>0.7)
+        tempV[curidx] = (r.reshape(N, 3, 3) @ (tempV.reshape(N, 778, 3, 1)*curweight))[:, :, :, 0][curidx]
+        '''
+        #print('svd error', torch.mean(torch.sqrt(torch.sum((b - aa) ** 2, dim=2))))
         return r,t
 
 
