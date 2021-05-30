@@ -3,10 +3,7 @@ import torch
 import torch.nn.functional as F
 from torch.autograd import Variable
 from cscPy.mano.network.utilsSmallFunctions import *
-STB2Bighand_skeidx = [0, 17, 13, 9, 5, 1, 18, 19, 20, 14, 15, 16, 10, 11, 12, 6, 7, 8, 2, 3, 4]
-Bighand2mano_skeidx = [0, 2, 9, 10, 3, 12, 13, 5, 18, 19, 4, 15, 16, 1, 6, 7, 8, 11, 14, 17, 20]
-RHD2Bighand_skeidx = [0,4,8,12,16,20,3,2,1,7,6,5,11,10,9,15,14,13,19,18,17]
-SynthHands2Bighand_skeidx=[0,1,5,9,13,17,2,6,10,14,18,3,7,11,15,19,4,8,12,16,20]
+
 
 
 
@@ -98,14 +95,21 @@ def getHomo3D(x):
         return np.concatenate([x,np.ones([*(x.shape[:-1])]+[1],dtype=np.float64)],axis=-1)
     return x
 
+def disPoint2Plane(points,planeNorm,planeD):
+    N = points.shape[0]
+    return (torch.sum((points.reshape(N,3) * planeNorm.reshape(N,3)).reshape(N, 3), dim=1, keepdim=True)
+           + planeD.reshape(N,1)).reshape(N, 1)
+
 def projectPoint2Plane(points,planeNorm,planeD):
     N=points.shape[0]
-    # print(planeNorm.reshape(N,3))
-    # print(torch.sum((points * planeNorm.reshape(N,3)).reshape(N, 3), dim=1, keepdim=True).shape)
-    # print(planeD.reshape(N,1).shape)
-    dis = (torch.sum((points * planeNorm.reshape(N,3)).reshape(N, 3), dim=1, keepdim=True) + planeD.reshape(N,1)).reshape(N, 1)
+    #https://stackoverflow.com/questions/9605556/how-to-project-a-point-onto-a-plane-in-3d
+    dis=disPoint2Plane(points,planeNorm,planeD).reshape(N, 1)
+    #plane: ax+by+cz+d=0
+    #norm: (a,b,c)
+    #dis=norm*point+d
     projectedPoint = (points - dis*planeNorm.reshape(N,3)).reshape(N, 3)
-    return projectedPoint
+    #ans=point-dist*norm
+    return dis,projectedPoint
 
 
 

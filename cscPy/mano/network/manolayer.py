@@ -2,11 +2,6 @@ import pickle
 
 import torch.nn as nn
 
-
-
-# joint mapping indices from mano to bighand
-mano2bighand_skeidx = [0, 13, 1, 4, 10, 7, 14, 15, 16, 2, 3, 17, 5, 6, 18, 11, 12, 19, 8, 9, 20]
-
 from cscPy.mano.network.utils import *
 from cscPy.mano.network.utilsSmallFunctions import *
 from cscPy.mano.network.Const import boneSpace
@@ -353,54 +348,6 @@ class MANO_SMPL(nn.Module):
 
 
 
-    def restrainFingerDirectly(self,joint_gt:np.ndarray):
-        N=joint_gt.shape[0]
-        jidx = [[1, 2, 3, 17], [4, 5, 6, 18], [10, 11, 12, 19], [7, 8, 9, 20], [13, 14, 15, 16]]
-        from itertools import combinations
-        for finger in jidx:
-            subsets = list(combinations(finger, 3))
-            vlist=[]
-            for subset in subsets:
-                v0=joint_gt[:,subset[0]]-joint_gt[:,subset[1]]
-                v1=joint_gt[:,subset[1]]-joint_gt[:,subset[2]]
-                vh=torch.cross(v0,v1,dim=1)
-                vlist.append(vh.reshape(1,N,3))
-            vh=torch.mean(torch.cat(vlist,dim=0),dim=0).reshape(N,1,3)
-            subj=joint_gt[:,finger]
-            vd=torch.mean(-torch.sum(subj*vh,dim=2),dim=1)
-            for idx in range(4):
-                joint_gt[:,finger[idx]]=projectPoint2Plane(joint_gt[:,finger[idx]],vh,vd)
-        return joint_gt
-
-    def get_palm_norm(self,joint_gt:np.ndarray):
-        palmNorm = unit_vector(torch.cross(joint_gt[:, 4] - joint_gt[:, 0], joint_gt[:, 7] - joint_gt[:, 4], dim=1))
-        return palmNorm
-
-    def restrainFingerAngle(self,joint_gt:np.ndarray):
-        N = joint_gt.shape[0]
-        joint_gt=self.restrainFingerDirectly(joint_gt)
-        palmNorm=self.get_palm_norm(joint_gt).reshape(N,3)
-        vecWristMcp=unit_vector(joint_gt[:, 4] - joint_gt[:, 0]).reshape(N,3)
-        stdFingerNorm=unit_vector(torch.cross(palmNorm,vecWristMcp,dim=1))
-        jidx = [[0,1, 2, 3, 17], [0,4, 5, 6, 18], [0,10, 11, 12, 19], [0,7, 8, 9, 20]]
-        loss=0
-        for finger in jidx:
-            angleThreshold=[3.14/(2*12),3.14/(2*6)]
-            for i in range(1,3):
-                #print('finger i',finger,i)
-                a0,a1,a2=joint_gt[:,finger[i]],joint_gt[:,finger[i+1]],joint_gt[:,finger[i+2]].reshape(N,3)
-                a,b=unit_vector(a1-a0),unit_vector(a2-a1)
-                fingernorm=unit_vector(torch.cross(a,b,dim=1))
-                sign=torch.sum(fingernorm*stdFingerNorm,dim=1).reshape(N)
-                #print('sign',sign)
-                angle = torch.acos(torch.sum(a * b, dim=1))
-                loss += torch.sum((sign < 0) & (torch.abs(angle) > angleThreshold[i - 1]))
-                #print('loss', (sign < 0) & (torch.abs(angle) > angleThreshold[i - 1]))
-        return joint_gt,loss
-
-
-
-
 
     def matchTemplate2JointsGreedy(self,joint_gt:np.ndarray,tempJ=None,restrainFingerDOF=0):
         #restrainFingerDOF=1 forward
@@ -501,7 +448,7 @@ class MANO_SMPL(nn.Module):
             # ratio.append(np.linalg.norm(v0) / np.linalg.norm(v1))
 
             if(pi in mcpidx and restrainFingerDOF==1):
-                projectedPoint=projectPoint2Plane(points=joint_gt[:,i],planeNorm=palmNorm,planeD=palmd)
+                dis,projectedPoint=projectPoint2Plane(points=joint_gt[:,i],planeNorm=palmNorm,planeD=palmd)
 
                 self.mcpjoints[:,i]=projectedPoint.clone().reshape(N,3)
                 vp=(projectedPoint - tempJ[:,pi]).reshape(N,3)
@@ -515,8 +462,8 @@ class MANO_SMPL(nn.Module):
                     #fingerbaseD=v1.clone()
                     #fingerNorm=unit_vector(torch.cross(rotedHarizon,fingerbaseD,dim=1).reshape(N,3))
                     FingerD=-torch.sum(fingerNorm*tempJ[mask,i],dim=1,keepdim=True)
-                    projectedjoint1 = projectPoint2Plane(points=joint_gt[mask, manoidx[idx+1]], planeNorm=fingerNorm, planeD=FingerD)
-                    projectedjoint2 = projectPoint2Plane(points=joint_gt[mask, manoidx[idx+2]], planeNorm=fingerNorm, planeD=FingerD)
+                    dis1,projectedjoint1 = projectPoint2Plane(points=joint_gt[mask, manoidx[idx+1]], planeNorm=fingerNorm, planeD=FingerD)
+                    dis2,projectedjoint2 = projectPoint2Plane(points=joint_gt[mask, manoidx[idx+2]], planeNorm=fingerNorm, planeD=FingerD)
                     joint_gt[mask, manoidx[idx + 1]]=projectedjoint1
                     joint_gt[mask, manoidx[idx + 2]]=projectedjoint2
 
