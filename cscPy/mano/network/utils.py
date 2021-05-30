@@ -102,6 +102,7 @@ def disPoint2Plane(points,planeNorm,planeD):
 
 def projectPoint2Plane(points,planeNorm,planeD):
     N=points.shape[0]
+    points=points.reshape(N,3)
     #https://stackoverflow.com/questions/9605556/how-to-project-a-point-onto-a-plane-in-3d
     dis=disPoint2Plane(points,planeNorm,planeD).reshape(N, 1)
     #plane: ax+by+cz+d=0
