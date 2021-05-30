@@ -74,34 +74,35 @@ class BiomechanicalLayer(nn.Module):
 
     def restrainAbductionAngle(self,joints: torch.Tensor)->torch.Tensor:
         N = joints.shape[0]
-        scale=self.jointCheck(joint_gt)
+        scale=self.jointCheck(joints)
         normidx = [1, 2, 2, 3]  # index,middle,ringy,pinky,thumb
         mcpidx = [1, 4, 10, 7]
         pipidx = [2, 5, 11, 8]
         loss=0
-        angleC = torch.tensor([np.pi/2/3,np.pi/2/6,np.pi/2/6,np.pi/2/6], device=joints.device, dtype=joints.dtype)
+        angleC = torch.tensor([np.pi/2/3,np.pi/2/3,np.pi/2/3,np.pi/2/3], device=joints.device, dtype=joints.dtype)
         for i in range(4):
             palmNorm = self.getPalmNormByIndex(joints, normidx[i]).reshape(N, 3)  # palm up
             vh = palmNorm.reshape(N, 3)
-            mcp = joint_gt[:, mcpidx[i]].reshape(N,3)
+            mcp = joints[:, mcpidx[i]].reshape(N,3)
             vd = -torch.sum(mcp * vh, dim=1).reshape(N, 1)
-            pip = joint_gt[:, pipidx[i]].reshape(N,3)
+            pip = joints[:, pipidx[i]].reshape(N,3)
             projpip=projectPoint2Plane(pip,vh,vd)[1].reshape(N,3)
             dis=torch.cdist(mcp,pip).reshape(N,1)
-            if(torch.cdist(projpip,mcp)<0.1*dis):continue
-            a=unit_vector(joint_gt[:,mcpidx[i]]-joint_gt[:,0])
+            flexRatio=torch.cdist(projpip,mcp)/dis
+            if(flexRatio<0.1):continue
+            a=unit_vector(joints[:,mcpidx[i]]-joints[:,0])
             b=unit_vector(projpip-mcp)
             angle = torch.acos(torch.sum(a * b, dim=1))
             curloss=torch.mean(torch.max(angle-angleC[i],
-                                                  torch.zeros_like(angle))*dis*scale)
+                                                  torch.zeros_like(angle))*dis*scale*flexRatio)
             loss+=torch.mean(torch.max(angle-angleC[i],
-                                                  torch.zeros_like(angle))*dis*scale)
-            print("angle,idx,loss",angle,angle/3.14*180,mcpidx[i],curloss)
+                                                  torch.zeros_like(angle))*dis*scale*flexRatio)
+            print("angle,idx,loss",angle,angle/3.14*180,mcpidx[i],curloss,*flexRatio)
         return loss
 
     def restrainFlexAngle(self, joints: torch.Tensor)->torch.Tensor:
         N = joints.shape[0]
-        scale=self.jointCheck(joint_gt)
+        scale=self.jointCheck(joints)
         normidx=[-1,-1,-1,-1,0] #index,middle,ringy,pinky,thumb
         mcpidx=[1,4,10,7,13]
         stdFingerNorms=[]
@@ -116,6 +117,8 @@ class BiomechanicalLayer(nn.Module):
         for fidx,finger in enumerate(jidx):
             angleP = torch.tensor([np.pi*3.2 / 4]*3,device=joints.device,dtype=joints.dtype)
             angleN = torch.tensor([3.14 / 2,3.14 / 18 ,3.14 / 4],device=joints.device,dtype=joints.dtype)
+            angleNthumb = torch.tensor([3.14 / 2,3.14 / 4 ,3.14 / 4],device=joints.device,dtype=joints.dtype)
+            if(fidx==4):angleN=angleNthumb
             for i in fidces[fidx]:
                 a0, a1, a2 = joints[:, finger[i]], joints[:, finger[i + 1]], joints[:, finger[i + 2]].reshape(N, 3)
                 a, b = unit_vector(a1 - a0), unit_vector(a2 - a1)
@@ -123,7 +126,7 @@ class BiomechanicalLayer(nn.Module):
                 fingernorm = unit_vector(torch.cross(a, b, dim=1))
                 sign = torch.sum(fingernorm * stdFingerNorms[fidx], dim=1).reshape(N)
                 angle = torch.acos(torch.sum(a * b, dim=1)).reshape(N)
-                print(finger[i:i+3],angle,sign,disb)
+                print(finger[i:i+3],angle,angle/3.14*180,sign,disb)
                 angle=torch.abs(angle)
                 maskpositive=(sign>=0)
                 masknegative=(sign<0)
