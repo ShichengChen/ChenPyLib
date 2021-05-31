@@ -9,6 +9,7 @@ from cscPy.mano.network.Const import boneSpace
 class BiomechanicalLayer(nn.Module):
     def __init__(self, fingerPlaneLoss=False,fingerFlexLoss=False,fingerAbductionLoss=False):
         super(BiomechanicalLayer, self).__init__()
+        ##only works for right hand!!!
         self.fingerPlaneLoss=fingerPlaneLoss
         self.fingerFlexLoss=fingerFlexLoss
         self.fingerAbductionLoss=fingerAbductionLoss
@@ -22,9 +23,12 @@ class BiomechanicalLayer(nn.Module):
             dir,joint_gt=self.restrainFingerDirectly(joint_gt)
             print("plane sum dis",torch.sum(dir))
             loss+=self.restrainFlexAngle(joint_gt)
+            print("flex loss",loss)
         if(self.fingerAbductionLoss):
             dir, joint_gt = self.restrainFingerDirectly(joint_gt)
-            loss += self.restrainAbductionAngle(joint_gt)
+            curloss=self.restrainAbductionAngle(joint_gt)
+            print("abduction loss",curloss)
+            loss +=curloss
         return loss
 
     def jointCheck(self, joint_gt: torch.Tensor)->int:
@@ -79,7 +83,9 @@ class BiomechanicalLayer(nn.Module):
         mcpidx = [1, 4, 10, 7]
         pipidx = [2, 5, 11, 8]
         loss=0
-        angleC = torch.tensor([np.pi/2/3,np.pi/2/3,np.pi/2/3,np.pi/2/3], device=joints.device, dtype=joints.dtype)
+        r=6
+        angleP = torch.tensor([np.pi/r+0.1890,np.pi/r+0.1331,np.pi/r-0.1491,np.pi/r+0.0347], device=joints.device, dtype=joints.dtype)
+        angleN = torch.tensor([np.pi/r-0.1890,np.pi/r-0.1331,np.pi/r+0.1491,np.pi/r-0.0347], device=joints.device, dtype=joints.dtype)
         for i in range(4):
             palmNorm = self.getPalmNormByIndex(joints, normidx[i]).reshape(N, 3)  # palm up
             vh = palmNorm.reshape(N, 3)
@@ -89,15 +95,25 @@ class BiomechanicalLayer(nn.Module):
             projpip=projectPoint2Plane(pip,vh,vd)[1].reshape(N,3)
             dis=torch.cdist(mcp,pip).reshape(N,1)
             flexRatio=torch.cdist(projpip,mcp)/dis
-            if(flexRatio<0.1):continue
-            a=unit_vector(joints[:,mcpidx[i]]-joints[:,0])
-            b=unit_vector(projpip-mcp)
+            flexRatio[flexRatio<0.15]=0
+            #remove influence of perpendicular fingers
+            a=unit_vector(joints[:,mcpidx[i]]-joints[:,0]).reshape(N,3)
+            b=unit_vector(projpip-mcp).reshape(N,3)
+            sign=torch.sum(torch.cross(a,b,dim=1)*palmNorm,dim=1)
+            maskP=sign>=0
+            maskN=sign<0
             angle = torch.acos(torch.sum(a * b, dim=1))
-            curloss=torch.mean(torch.max(angle-angleC[i],
-                                                  torch.zeros_like(angle))*dis*scale*flexRatio)
-            loss+=torch.mean(torch.max(angle-angleC[i],
-                                                  torch.zeros_like(angle))*dis*scale*flexRatio)
-            print("angle,idx,loss",angle,angle/3.14*180,mcpidx[i],curloss,*flexRatio)
+            maskOver90=angle > 3.14 / 2
+            angle[maskOver90] = 3.14 - angle[maskOver90]
+            if(torch.sum(maskP)):
+                curloss=torch.mean(torch.max(angle[maskP]-angleP[i],
+                                                  torch.zeros_like(angle[maskP]))*dis[maskP]*scale*flexRatio[maskP])
+            if(torch.sum(maskN)):
+                curloss = torch.mean(torch.max(angle[maskN] - angleN[i],
+                                               torch.zeros_like(angle[maskN])) * dis[maskN] * scale * flexRatio[maskN])
+            loss+=curloss
+            print("angle,idx,loss",angle,angle/3.14*180,mcpidx[i],curloss)
+            print('flexRatio,sign,maskOver90',flexRatio,sign,maskOver90)
         return loss
 
     def restrainFlexAngle(self, joints: torch.Tensor)->torch.Tensor:
@@ -128,6 +144,7 @@ class BiomechanicalLayer(nn.Module):
                 angle = torch.acos(torch.sum(a * b, dim=1)).reshape(N)
                 print(finger[i:i+3],angle,angle/3.14*180,sign,disb)
                 angle=torch.abs(angle)
+
                 maskpositive=(sign>=0)
                 masknegative=(sign<0)
                 if(torch.sum(maskpositive)):
@@ -165,10 +182,10 @@ if __name__ == "__main__":
     # pose[4,2]-=1.57/2
     # for i in range(12):
     #     pose[i,2]+=1.57/1.5
-    pose[0, 1]-=np.pi/2/3
-    pose[3, 1]-=np.pi/2/3
-    pose[6, 1]-=np.pi/2/3
-    pose[9, 1]-=np.pi/2/3
+    # pose[0, 1]+=np.pi/2/3
+    # pose[3, 1]+=np.pi/2/3
+    # pose[6, 1]+=np.pi/2/3
+    # pose[9, 1]+=np.pi/2/3
     vertex_gt, joint_gt = \
                 mano_right.get_mano_vertices(rootr.view(1, 1, 3),
                                              pose.view(1, 45),
