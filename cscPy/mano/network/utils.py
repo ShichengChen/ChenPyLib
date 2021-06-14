@@ -104,13 +104,13 @@ def projectPoint2Plane(points,planeNorm,planeD):
     N=points.shape[0]
     points=points.reshape(N,3)
     #https://stackoverflow.com/questions/9605556/how-to-project-a-point-onto-a-plane-in-3d
-    dis=disPoint2Plane(points,planeNorm,planeD).reshape(N, 1)
+    dis=disPoint2Plane(points,planeNorm,planeD).reshape(N,1)
     #plane: ax+by+cz+d=0
     #norm: (a,b,c)
     #dis=norm*point+d
     projectedPoint = (points - dis*planeNorm.reshape(N,3)).reshape(N, 3)
     #ans=point-dist*norm
-    return dis,projectedPoint
+    return torch.abs(dis),projectedPoint
 
 
 
@@ -232,6 +232,7 @@ def getPortionWeightCoeff(weight):
 
 def planeAlignment(temp0,temp1,targetd0,targetd1):
     N=temp0.shape[0]
+    #print('targetd0',targetd0)
     r = getRotationBetweenTwoVector(temp0, targetd0)
     pl0 = r @ temp1.reshape(N, 3, 1)
     pl0 = pl0.reshape(N, 3)
@@ -248,10 +249,11 @@ def wristRotTorch(tempJ,joint_gt):
     N=tempJ.shape[0]
     ##assume norm of palm is z direction
     ##wirst to mmcp is y direction
-    z0 = torch.cross(tempJ[:, 4] - tempJ[:, 0], tempJ[:, 7] - tempJ[:, 4], dim=1)
-    z1 = torch.cross(joint_gt[:, 4] - joint_gt[:, 0], joint_gt[:, 7] - joint_gt[:, 4], dim=1)
+    z0 = unit_vector(torch.cross(tempJ[:, 4] - tempJ[:, 0], tempJ[:, 7] - tempJ[:, 4], dim=1))
+    z1 = unit_vector(torch.cross(joint_gt[:, 4] - joint_gt[:, 0], joint_gt[:, 7] - joint_gt[:, 4], dim=1))
     y0 = (tempJ[:, 4] - tempJ[:, 0]).reshape(N, 3, 1)
     y1 = (joint_gt[:, 4] - joint_gt[:, 0])
+    #print('z0y0z1,zy',z0,y0,z1,y1)
     r=planeAlignment(z0,y0,z1,y1)
     if isnumpy:return r.reshape(3,3).numpy()
     return r

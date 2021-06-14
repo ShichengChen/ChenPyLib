@@ -1,20 +1,21 @@
-import pandas as pd
-import numpy as np
-import matplotlib.pyplot as plt
-import seaborn as sb
-df=pd.read_csv("Data.csv")
-tn=['t'+str(i) for i in range(1,11)]
-id=np.unique(df['ID'].values)
-for i in id:assert np.sum(df['ID']==i)==10,"bad data"
-df['group']=-1
-for t in tn:
-    ids=df[df['Time']==t].ID
-    #print(ids)
-    assert len(np.unique(ids))==len(ids),"duplicate"
-    vals=df[df['Time']==t].Value
-    ans=pd.qcut(vals,4, labels=False)
-    print(ans.values)
-    #df[df['Time'] == t]['group']=ans.values.copy()
-    df.loc[df['Time'] == t, 'group']=ans.values.copy()
-print(df)
+# import sys
+#
+# def solution(s):
+#     h = str(hex(int(s))[2:])
+#     ans=""
+#     for i in h:
+#         if(i=='0'):ans+='O'
+#         elif(i=='1'):ans+='I'
+#         else: ans+=i
+#     # print(ans)
+#     for i in ans:
+#         if i not in ['A','B','C','D','E','F','I','O']:
+#             return 'ERROR'
+#     return ans
+#
+# solution('257')
+
+from itertools import groupby
+
+
 

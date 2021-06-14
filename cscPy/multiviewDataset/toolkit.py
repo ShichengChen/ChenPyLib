@@ -5,15 +5,15 @@ from cscPy.globalCamera.camera import CameraIntrinsics,perspective_projection,pe
 from cscPy.globalCamera.constant import Constant
 from cscPy.mano.network import net
 from cscPy.mano.network.utils import AxisRotMat
-from cscPy.mano.dataloader.MFjointsDataloader import MF3D
+from cscPy.dataloader.MFjointsDataloader import MF3D
 import numpy as np
 import torch
 import cv2
 
 class MultiviewDatasetDemo():
     def __init__(self,manoPath='/home/csc/MANO-hand-model-toolkit/mano/models/MANO_RIGHT.pkl',
-                 #file_path="/media/csc/Seagate Backup Plus Drive/dataset/7-14-1-2/mlresults/7-14-1-2_3_2result_32.pkl",
-                 file_path="/media/csc/Seagate Backup Plus Drive/dataset/9-10-1-2/mlresults/9-10-1-2_1result_38.pkl",
+                 file_path="/media/csc/Seagate Backup Plus Drive/dataset/7-14-1-2/mlresults/7-14-1-2_3_2result_32.pkl",
+                 #file_path="/media/csc/Seagate Backup Plus Drive/dataset/9-10-1-2/mlresults/9-10-1-2_1result_38.pkl",
                  loadMode=True,
                  readNotFromBinary=False,
                  loadManoParam=False,
@@ -50,8 +50,12 @@ class MultiviewDatasetDemo():
         for i in range(4):
             if (np.allclose(camera_pose[i], np.eye(4))):
                 rootcameraidx = i
+        # print("camera_pose",camera_pose)
         self.camera_pose,self.camera=camera_pose,camera
         self.rootcameraidx=rootcameraidx
+        print('self.rootcameraidx',self.rootcameraidx)
+
+
 
         joints = np.load(os.path.join(baseDir, "mlresults", self.date + '-joints.npy'))
         self.N=joints.shape[0]
@@ -63,6 +67,13 @@ class MultiviewDatasetDemo():
             joints4view[dev_idx] = inv @ self.joints
         self.joints4view=joints4view
 
+        self.avemmcp=np.mean(joints4view[rootcameraidx,:,5,:3],axis=0)
+        # for i in range(4):
+        #     print("camera idx",i,np.median(joints4view[i,:,5,:3],axis=0).reshape(-1))
+        # print("self.avemmcp",self.avemmcp.reshape(-1))
+        # print("median",np.median(joints4view[rootcameraidx,:,5,:3],axis=0).reshape(-1))
+        #print("std",np.std(joints4view[rootcameraidx,:,5,:3],axis=0))
+        #[[31.03781234] [30.23725049] [28.52284834]]
 
         if(loadMode):
             train_dataset = MF3D(file_path=file_path, adjust=0, onlygt=False, usedirect=True)
@@ -81,7 +92,7 @@ class MultiviewDatasetDemo():
         cam_list = ['840412062035', '840412062037', '840412062038', '840412062076']
         return self.camera[cam_list[iv]]
     def getCameraPose(self):
-        calib_path = os.path.join(baseDir, 'calib.pkl')
+        calib_path = os.path.join(self.baseDir, 'calib.pkl')
         with open(calib_path, 'rb') as f:
             camera_pose_map = pickle.load(f)
         cam_list = ['840412062035', '840412062037', '840412062038', '840412062076']
@@ -184,15 +195,16 @@ class MultiviewDatasetDemo():
         for iv in range(4): dms.append(self.readDepth(idx,iv))
         if(uselist):return dms
         else:return np.hstack(dms)
-    def getBetterDepth(self,idx):
+    def getBetterDepth(self,idx,uselist=False):
         dlist = []
         for iv in range(4):
             depth = self.readDepth(idx,iv)
             dlist.append(visualize_better_qulity_depth_map(depth))
+        if (uselist): return dlist
         return np.hstack(dlist)
 
     def getManoVertex(self,idx):
-        results = self.getManoParam(idx)
+        results,scale, joint_root = self.getManoParam(idx)
         vertex, joint_pre = \
             self.mano_right.get_mano_vertices(results['pose_aa'][:, 0:1, :],
                                          results['pose_aa'][:, 1:, :], results['shape'],
@@ -213,7 +225,7 @@ class MultiviewDatasetDemo():
         joints_gt = joints_gt.to('cuda')
         jd = torch.cat([joints_gt, direct], dim=0).reshape(1,41,3)
         results = self.model(jd)
-        return results
+        return results,scale, joint_root
 
 
     def get4viewManovertices(self,idx):
@@ -331,13 +343,12 @@ class MultiviewDatasetDemo():
             cloud4v = np.ones([4, cloud.shape[0], 4, 1])
         #save cloud after sampling
         self.cloud=cloud
-
-
         for iv in range(4):
             inv = np.linalg.inv(self.camera_pose[iv])
             cloud4v[iv] = inv @ cloud
         self.cloud4v=cloud4v
         return cloud4v
+
     def drawCloud4view(self,idx,sampleN=1000,view=4,depthInfluenceColor=False):
         assert (view==1 or view==4),"only support 4 and 1 view"
         background = np.ones([4, 480, 640, 3]).astype(np.uint8) * 255
@@ -383,10 +394,23 @@ class MultiviewDatasetDemo():
 
     def getMMCP(self,idx,iv):
         ujoints=self.joints4view[iv,idx,:21,:3,0].copy()
-        rgbuvd = perspective_projection(ujoints[5], self.camera[iv]).astype(int)[:2]
-        return rgbuvd.reshape(-1).astype(int)[:2]
+        return ujoints[5]
+    def getScale(self,idx,iv):
+        ujoints=self.joints4view[iv,idx,:21,:3,0].copy()
+        from cscPy.mano.network.utilsSmallFunctions import vector_dis
+        return vector_dis(ujoints[5],ujoints[6])
 
 
+    def getPose2D(self,idx,view):
+        ujoints = self.joints4view[view, idx, :21, :3, 0].copy()
+        uvdlist=[]
+        for jdx in range(21):
+            rgbuvd = perspective_projection(ujoints[jdx], self.camera[view]).astype(int)[:2]
+            uvdlist.append(rgbuvd)
+        return np.array(uvdlist).reshape(21,2)#uvd array
+
+    def getPose3D(self,idx,view):
+        return self.joints4view[view, idx, :21, :3, 0].copy()
 
     def drawPose4view(self,idx,view=4):
         assert (view == 1 or view == 4), "only support 4 and 1 view"
@@ -406,6 +430,10 @@ class MultiviewDatasetDemo():
         if(view==1):imgs = imgs[0].copy()
         else:imgs = np.hstack(imgs)
         return imgs
+
+
+if __name__ == "__main__":
+    demo=MultiviewDatasetDemo()
 
 
 

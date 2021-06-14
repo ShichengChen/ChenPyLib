@@ -13,36 +13,38 @@ class BiomechanicalLayer(nn.Module):
         self.fingerPlaneLoss=fingerPlaneLoss
         self.fingerFlexLoss=fingerFlexLoss
         self.fingerAbductionLoss=fingerAbductionLoss
+        self.nocheckScale=True
 
-    def forward(self,joint_gt):
-        loss=0
+    def forward(self,joint_gt: torch.Tensor,scale:torch.Tensor):
+        N=joint_gt.shape[0]
+        bonelen=scale.reshape(N)
+        loss,disEudloss=0,0
         if(self.fingerPlaneLoss):
-            pass
-            #loss+=self.restrainFingerAngle()
+            curloss,disEud,_=self.restrainFingerDirectly(joint_gt,bonelen)
+            #print("plane loss",curloss)
+            loss+=curloss
+            disEudloss+=disEud
         if(self.fingerFlexLoss):
-            dir,joint_gt=self.restrainFingerDirectly(joint_gt)
-            print("plane sum dis",torch.sum(dir))
-            loss+=self.restrainFlexAngle(joint_gt)
-            print("flex loss",loss)
+            _,_,joint_gt=self.restrainFingerDirectly(joint_gt,bonelen)
+            curloss,disEud=self.restrainFlexAngle(joint_gt,bonelen)
+            # print("flex loss",curloss)
+            loss+=curloss
+            disEudloss += disEud
+            #print("flex loss",loss)
         if(self.fingerAbductionLoss):
-            dir, joint_gt = self.restrainFingerDirectly(joint_gt)
-            curloss=self.restrainAbductionAngle(joint_gt)
-            print("abduction loss",curloss)
+            _,_,joint_gt = self.restrainFingerDirectly(joint_gt,bonelen)
+            curloss,disEud=self.restrainAbductionAngle(joint_gt,bonelen)
+            # print("abduction loss",curloss)
             loss +=curloss
-        return loss
+            disEudloss += disEud
+        return loss,disEudloss
 
-    def jointCheck(self, joint_gt: torch.Tensor)->int:
-        N = joint_gt.shape[0]
-        scale = 1  # from meter to milimeter
-        joint_gt = joint_gt.reshape(N, 21, 3)
-        if (torch.mean(torch.sum(joint_gt[:, 0] - joint_gt[:, 1])) < 1): scale = 1000
-        return scale
 
-    def restrainFingerDirectly(self, joint_gt: torch.Tensor)->(torch.Tensor,torch.Tensor):
+    def restrainFingerDirectly(self, joint_gt: torch.Tensor,bonelen: torch.Tensor,)\
+            ->(torch.Tensor,torch.Tensor,torch.Tensor):
         N = joint_gt.shape[0]
-        scale=self.jointCheck(joint_gt)
         newjoints_gt=joint_gt.clone()
-        distance=torch.zeros([N,21],device=joint_gt.device,requires_grad=True,dtype=joint_gt.dtype)
+        distance=torch.zeros([N,21,1],device=joint_gt.device,requires_grad=False,dtype=joint_gt.dtype)
         jidx = [[1, 2, 3, 17], [4, 5, 6, 18], [10, 11, 12, 19], [7, 8, 9, 20], [13, 14, 15, 16]]
         from itertools import combinations
         for finger in jidx:
@@ -59,7 +61,8 @@ class BiomechanicalLayer(nn.Module):
             for idx in range(4):
                 distance[:,finger[idx]], newjoints_gt[:, finger[idx]] = \
                     projectPoint2Plane(joint_gt[:, finger[idx]], vh, vd)
-        return distance*scale, newjoints_gt
+        cur=torch.mean(distance, dim=(1, 2))
+        return torch.mean(cur),torch.mean(cur*bonelen), newjoints_gt
 
     #n0=wrist tmcp imcp
     #n1=wrist imcp mmcp
@@ -76,13 +79,12 @@ class BiomechanicalLayer(nn.Module):
         palmNorm = unit_vector(torch.cross(joint_gt[:, 4] - joint_gt[:, 0], joint_gt[:, 7] - joint_gt[:, 4], dim=1))
         return palmNorm
 
-    def restrainAbductionAngle(self,joints: torch.Tensor)->torch.Tensor:
+    def restrainAbductionAngle(self,joints: torch.Tensor,bonelen: torch.Tensor,)->torch.Tensor:
         N = joints.shape[0]
-        scale=self.jointCheck(joints)
         normidx = [1, 2, 2, 3]  # index,middle,ringy,pinky,thumb
         mcpidx = [1, 4, 10, 7]
         pipidx = [2, 5, 11, 8]
-        loss=0
+        loss,disEud=0,0
         r=6
         angleP = torch.tensor([np.pi/r+0.1890,np.pi/r+0.1331,np.pi/r-0.1491,np.pi/r+0.0347], device=joints.device, dtype=joints.dtype)
         angleN = torch.tensor([np.pi/r-0.1890,np.pi/r-0.1331,np.pi/r+0.1491,np.pi/r-0.0347], device=joints.device, dtype=joints.dtype)
@@ -93,8 +95,8 @@ class BiomechanicalLayer(nn.Module):
             vd = -torch.sum(mcp * vh, dim=1).reshape(N, 1)
             pip = joints[:, pipidx[i]].reshape(N,3)
             projpip=projectPoint2Plane(pip,vh,vd)[1].reshape(N,3)
-            dis=torch.cdist(mcp,pip).reshape(N,1)
-            flexRatio=torch.cdist(projpip,mcp)/dis
+            dis=euDist(mcp,pip).reshape(N)
+            flexRatio=euDist(projpip,mcp).reshape(N)/dis
             flexRatio[flexRatio<0.15]=0
             #remove influence of perpendicular fingers
             a=unit_vector(joints[:,mcpidx[i]]-joints[:,0]).reshape(N,3)
@@ -102,23 +104,25 @@ class BiomechanicalLayer(nn.Module):
             sign=torch.sum(torch.cross(a,b,dim=1)*palmNorm,dim=1)
             maskP=sign>=0
             maskN=sign<0
-            angle = torch.acos(torch.sum(a * b, dim=1))
+            angle = torch.acos(torch.sum(a * b, dim=1)).reshape(N)
             maskOver90=angle > 3.14 / 2
             angle[maskOver90] = 3.14 - angle[maskOver90]
             if(torch.sum(maskP)):
-                curloss=torch.mean(torch.max(angle[maskP]-angleP[i],
-                                                  torch.zeros_like(angle[maskP]))*dis[maskP]*scale*flexRatio[maskP])
+                cur=torch.max(angle[maskP] - angleP[i],
+                          torch.zeros_like(angle[maskP])) * dis[maskP] * flexRatio[maskP]
+                loss += torch.mean(cur)
+                disEud+=torch.mean(cur*bonelen[maskP])
             if(torch.sum(maskN)):
-                curloss = torch.mean(torch.max(angle[maskN] - angleN[i],
-                                               torch.zeros_like(angle[maskN])) * dis[maskN] * scale * flexRatio[maskN])
-            loss+=curloss
-            print("angle,idx,loss",angle,angle/3.14*180,mcpidx[i],curloss)
-            print('flexRatio,sign,maskOver90',flexRatio,sign,maskOver90)
-        return loss
+                cur=torch.max(angle[maskN] - angleN[i],
+                          torch.zeros_like(angle[maskN])) * dis[maskN] * flexRatio[maskN]
+                loss += torch.mean(cur)
+                disEud += torch.mean(cur * bonelen[maskN])
+            #print("angle,idx,loss",angle,angle/3.14*180,mcpidx[i],curloss)
+            #print('flexRatio,sign,maskOver90',flexRatio,sign,maskOver90)
+        return loss,disEud
 
-    def restrainFlexAngle(self, joints: torch.Tensor)->torch.Tensor:
+    def restrainFlexAngle(self, joints: torch.Tensor,bonelen: torch.Tensor,)->torch.Tensor:
         N = joints.shape[0]
-        scale=self.jointCheck(joints)
         normidx=[-1,-1,-1,-1,0] #index,middle,ringy,pinky,thumb
         mcpidx=[1,4,10,7,13]
         stdFingerNorms=[]
@@ -129,7 +133,7 @@ class BiomechanicalLayer(nn.Module):
             stdFingerNorms.append(stdFingerNorm.clone())
         jidx = [[0, 1, 2, 3, 17], [0, 4, 5, 6, 18], [0, 10, 11, 12, 19], [0, 7, 8, 9, 20],[0, 13,14,15,16]]
         fidces = [[0, 1, 2], [0, 1, 2],[0, 1, 2],[0, 1, 2],[1, 2],]
-        loss = 0
+        loss,disEud = 0,0
         for fidx,finger in enumerate(jidx):
             angleP = torch.tensor([np.pi*3.2 / 4]*3,device=joints.device,dtype=joints.dtype)
             angleN = torch.tensor([3.14 / 2,3.14 / 18 ,3.14 / 4],device=joints.device,dtype=joints.dtype)
@@ -138,27 +142,34 @@ class BiomechanicalLayer(nn.Module):
             for i in fidces[fidx]:
                 a0, a1, a2 = joints[:, finger[i]], joints[:, finger[i + 1]], joints[:, finger[i + 2]].reshape(N, 3)
                 a, b = unit_vector(a1 - a0), unit_vector(a2 - a1)
-                disb=torch.cdist(a1,a2).reshape(N)
+                disb=euDist(a1,a2).reshape(N)
                 fingernorm = unit_vector(torch.cross(a, b, dim=1))
+                # print(fingernorm.shape)
+                # print(stdFingerNorms[fidx].shape)
                 sign = torch.sum(fingernorm * stdFingerNorms[fidx], dim=1).reshape(N)
                 angle = torch.acos(torch.sum(a * b, dim=1)).reshape(N)
-                print(finger[i:i+3],angle,angle/3.14*180,sign,disb)
+                #print(finger[i:i+3],angle,angle/3.14*180,sign,disb)
                 angle=torch.abs(angle)
 
                 maskpositive=(sign>=0)
                 masknegative=(sign<0)
                 if(torch.sum(maskpositive)):
-                    print(torch.mean(torch.max(angle[maskpositive]-angleP[i],
-                                                  torch.zeros_like(angle[maskpositive]))*disb[maskpositive]*scale))
-                    loss += torch.mean(torch.max(angle[maskpositive]-angleP[i],
-                                                    torch.zeros_like(angle[maskpositive]))*disb[maskpositive]*scale)
+                    #print(torch.mean(torch.max(angle[maskpositive]-angleP[i],
+                    #                              torch.zeros_like(angle[maskpositive]))*disb[maskpositive]))
+                    cur=torch.max(angle[maskpositive]-angleP[i],
+                                                    torch.zeros_like(angle[maskpositive]))*disb[maskpositive]
+                    loss+=torch.mean(cur)
+                    disEud+=torch.mean(cur*bonelen[maskpositive])
                 if(torch.sum(masknegative)):
-                    print(torch.mean(torch.max(angle[masknegative]-angleN[i],
-                                                  torch.zeros_like(angle[masknegative]))*disb[masknegative]*scale))
-                    loss += torch.mean(torch.max(angle[masknegative]-angleN[i],
-                                                    torch.zeros_like(angle[masknegative]))*disb[masknegative]*scale)
+                    #print(torch.mean(torch.max(angle[masknegative]-angleN[i],
+                    #                              torch.zeros_like(angle[masknegative]))*disb[masknegative]))
+                    cur=torch.max(angle[masknegative]-angleN[i],
+                                                    torch.zeros_like(angle[masknegative]))*disb[masknegative]
+
+                    loss += torch.mean(cur)
+                    disEud+=torch.mean(cur*bonelen[masknegative])
                 # print('loss', (sign < 0) & (torch.abs(angle) > angleThreshold[i - 1]))
-        return loss
+        return loss,disEud
 
 
 
@@ -169,7 +180,7 @@ if __name__ == "__main__":
     biolayer=BiomechanicalLayer(fingerFlexLoss=True,fingerAbductionLoss=True)
 
     mano_right = MANO_SMPL('/home/csc/MANO-hand-model-toolkit/mano/models/MANO_RIGHT.pkl', ncomps=45, oriorder=True,
-                           cuda='cpu')
+                           device='cpu')
     rootr=torch.tensor(np.random.uniform(-0,0,[3]).astype(np.float32))
     pose=torch.tensor([[0,0,0],[0,0,0],[0,0,0],[0,0,0],[0,0,0],
                        [0,0,0],[0,0,0],[0,0,0],[0,0,0],[0,0,0],
