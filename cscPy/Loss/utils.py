@@ -15,7 +15,7 @@ def meanEuclideanLoss(pred, gt, scale, jointNr=21):
 def pose_loss(p0, p1, scale,jointN=21):
     pose_loss_rgb = torch.sum((p0 - p1) ** 2, dim=2)
     _, eucLoss_rgb = meanEuclideanLoss(p0, p1, scale,jointN)
-    return pose_loss_rgb, eucLoss_rgb
+    return torch.mean(pose_loss_rgb), eucLoss_rgb
 
 
 def getLatentLoss(z_mean, z_stddev, goalStd=1.0, eps=1e-9):
@@ -24,19 +24,22 @@ def getLatentLoss(z_mean, z_stddev, goalStd=1.0, eps=1e-9):
 
 
 class LossHelper():
-    def __init__(self):
+    def __init__(self,precision=3):
         self.loss={}
-    def add(self,name,value):
-        if(name in self.loss):
-            self.loss[name].append(float(value))
-        else:
-            self.loss[name]=[float(value)]
+        self.precision=int(precision)
+    def add(self,dic):
+        for name,value in dic.items():
+            if(name in self.loss):
+                self.loss[name].append(float(value))
+            else:
+                self.loss[name]=[float(value)]
     def show(self):
         for name in self.loss:
             print(name,':loss',np.mean(self.loss[name]))
     def showcurrent(self):
         for name in self.loss:
-            print(name,':',self.loss[name][-1],end=" ")
+            txt='{0:.'+str(self.precision)+'f}'
+            print(name,txt.format(self.loss[name][-1]),end=" ")
         print()
     def clear(self):
         self.loss={}

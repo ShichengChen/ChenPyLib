@@ -1,7 +1,7 @@
 import pickle
 
 import torch.nn as nn
-
+import os
 from cscPy.mano.network.utils import *
 from cscPy.mano.network.utilsSmallFunctions import *
 from cscPy.mano.network.Const import *
@@ -34,16 +34,19 @@ class MANO_SMPL(nn.Module):
         np_v_template = np.array(model['v_template'], dtype=np.float)
 
 
-        with open('/home/csc/objs/mano.obj', 'w') as the_file:
-            for i in range(778):
-                the_file.write('v ' + str(float(np_v_template[i,0])) + " " + str(float(np_v_template[i,1]))
-                               + " " + str(float(np_v_template[i,2])) + " 1.0\n")
-            for i in range(faces_mano.shape[0]):
-                the_file.write(
-                    'f ' + str(int(faces_mano[i, 0] + 1)) + " " + str(int(faces_mano[i, 1] + 1)) + " " + str(int(faces_mano[i, 2] + 1)) + "\n")
+        # with open('/home/csc/objs/mano.obj', 'w') as the_file:
+        #     for i in range(778):
+        #         the_file.write('v ' + str(float(np_v_template[i,0])) + " " + str(float(np_v_template[i,1]))
+        #                        + " " + str(float(np_v_template[i,2])) + " 1.0\n")
+        #     for i in range(faces_mano.shape[0]):
+        #         the_file.write(
+        #             'f ' + str(int(faces_mano[i, 0] + 1)) + " " + str(int(faces_mano[i, 1] + 1)) + " " + str(int(faces_mano[i, 2] + 1)) + "\n")
 
         ########read manoArm and reorder the mano vertex and faces
-        with open('/home/csc/ChenPyLib/cscPy/mano/network/manoArm.obj', 'r') as f:
+        objpath='/home/csc/ChenPyLib/cscPy/mano/network/manoArm.obj'
+        if not os.path.exists(objpath):
+            objpath='/home/shicheng/ChenPyLib/cscPy/mano/network/manoArm.obj'
+        with open(objpath, 'r') as f:
             content = f.readlines()
             faces,vs=[],[]
             for lines in content:

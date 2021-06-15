@@ -19,11 +19,14 @@ class MultiviewDatasetDemo():
                  loadManoParam=False,
 
     ):
-
+        if not os.path.exists(manoPath):
+            manoPath = '/home/shicheng/MANO-hand-model-toolkit/mano/models/MANO_RIGHT.pkl'
         self.mano_right = MANO_SMPL(manoPath, ncomps=45)
         self.readNotFromBinary=readNotFromBinary
         self.loadManoParam=loadManoParam
 
+        if(not os.path.exists(file_path)):
+            file_path="/mnt/ssd/csc/7-14-1-2/mlresults/7-14-1-2_3_2result_32.pkl"
         baseDir = file_path[:file_path.rfind('/', 0, file_path.rfind('/'))]
         self.baseDir=baseDir
         self.date = baseDir[baseDir.rfind('/') + 1:]
