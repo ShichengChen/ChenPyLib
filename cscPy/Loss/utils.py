@@ -13,7 +13,7 @@ def meanEuclideanLoss(pred, gt, scale, jointNr=21):
 
 
 def pose_loss(p0, p1, scale,jointN=21):
-    pose_loss_rgb = torch.sum((p0 - p1) ** 2, 1)
+    pose_loss_rgb = torch.sum((p0 - p1) ** 2, dim=2)
     _, eucLoss_rgb = meanEuclideanLoss(p0, p1, scale,jointN)
     return pose_loss_rgb, eucLoss_rgb
 
