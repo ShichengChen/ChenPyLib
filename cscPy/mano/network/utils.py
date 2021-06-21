@@ -110,7 +110,7 @@ def projectPoint2Plane(points,planeNorm,planeD):
     #dis=norm*point+d
     projectedPoint = (points - dis*planeNorm.reshape(N,3)).reshape(N, 3)
     #ans=point-dist*norm
-    return torch.abs(dis),projectedPoint
+    return torch.abs(1e-8+dis),projectedPoint
 
 
 
@@ -253,7 +253,7 @@ def wristRotTorch(tempJ,joint_gt):
     z1 = unit_vector(torch.cross(joint_gt[:, 4] - joint_gt[:, 0], joint_gt[:, 7] - joint_gt[:, 4], dim=1))
     y0 = (tempJ[:, 4] - tempJ[:, 0]).reshape(N, 3, 1)
     y1 = (joint_gt[:, 4] - joint_gt[:, 0])
-    #print('z0y0z1,zy',z0,y0,z1,y1)
+    #print('z0, y0, z1, zy',z0,y0,z1,y1)
     r=planeAlignment(z0,y0,z1,y1)
     if isnumpy:return r.reshape(3,3).numpy()
     return r

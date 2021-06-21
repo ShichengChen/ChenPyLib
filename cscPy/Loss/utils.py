@@ -1,10 +1,13 @@
 import torch
 import numpy as np
+from cscPy.Const.const import *
+from progress.bar import Bar
+from termcolor import colored, cprint
 
 def meanEuclideanLoss(pred, gt, scale, jointNr=21):
     pred = pred.view([-1, jointNr, 3])
     gt = gt.reshape([-1, jointNr, 3])
-    eucDistance = torch.squeeze(torch.sqrt(torch.sum((pred - gt) ** 2, dim=2)))
+    eucDistance = torch.squeeze(torch.sqrt(1e-8+torch.sum((pred - gt) ** 2, dim=2)))
     meanEucDistance_normed = torch.mean(eucDistance)
     #print('scale',scale.shape,scale)
     eucDistance = eucDistance * torch.squeeze(scale).view(scale.shape[0], 1)
@@ -12,11 +15,39 @@ def meanEuclideanLoss(pred, gt, scale, jointNr=21):
     return meanEucDistance_normed, meanEucDistance
 
 
-def pose_loss(p0, p1, scale,jointN=21):
+
+def cloud_dis(c0, c1,scale):
+    from chamfer_distance import ChamferDistance
+    chamfer_dist = ChamferDistance()
+    dist1, dist2 = chamfer_dist(c0, c1)
+    dis0 = torch.mean(dist1, dim=1)
+    dis1 = torch.mean(dist2, dim=1)
+    cdlossEud = torch.mean(dis0 * scale.reshape(-1, 1)) + torch.mean(dis1 * scale.reshape(-1, 1))
+    cdloss = torch.mean(dis0) + torch.mean(dis1)
+    return cdloss,cdlossEud
+
+def cloud_dis2(c0, c1,scale):
+    N=c0.shape[0]
+    c0=c0.reshape(N,906,1,3)
+    c1=c1.reshape(N,1,906,3)
+    dis=torch.sqrt(1e-8+torch.sum((c0-c1)**2,dim=3)).reshape(N,906,906)
+    #print(torch.min(dis,dim=1))
+    dis0=torch.min(dis,dim=1)[0]
+    dis1=torch.min(dis,dim=2)[0]
+    cdlossEud=torch.mean(dis0*scale.reshape(N,1))+torch.mean(dis1*scale.reshape(N,1))
+    cdloss=torch.mean(dis0)+torch.mean(dis1)
+    return cdloss,cdlossEud
+
+
+def pose3d_loss(p0, p1, scale,jointN=21):
     pose_loss_rgb = torch.sum((p0 - p1) ** 2, dim=2)
     _, eucLoss_rgb = meanEuclideanLoss(p0, p1, scale,jointN)
     return torch.mean(pose_loss_rgb), eucLoss_rgb
 
+def pose2d_loss(p0,p1):
+    pose_loss = torch.sum((p0 - p1) ** 2, dim=2)
+    eucLoss=torch.sqrt(pose_loss+epsilon)
+    return torch.mean(pose_loss),torch.mean(eucLoss)
 
 def getLatentLoss(z_mean, z_stddev, goalStd=1.0, eps=1e-9):
     latent_loss = 0.5 * torch.sum(z_mean**2 + z_stddev**2 - torch.log(z_stddev**2)  - goalStd, 1)
@@ -24,22 +55,58 @@ def getLatentLoss(z_mean, z_stddev, goalStd=1.0, eps=1e-9):
 
 
 class LossHelper():
-    def __init__(self,precision=3):
+    def __init__(self,precision=3,useBar=True):
         self.loss={}
         self.precision=int(precision)
+        self.useBar=useBar
+    def initForEachEpoch(self,lenFordataloader):
+        if(self.useBar):
+            self.bar = Bar(colored('Train', 'yellow'), max=lenFordataloader)
     def add(self,dic):
         for name,value in dic.items():
+            if (name == 'epoch' or name == 'iteration'):v=int(value)
+            else:v=float(value)
             if(name in self.loss):
-                self.loss[name].append(float(value))
+                self.loss[name].append(v)
             else:
-                self.loss[name]=[float(value)]
+                self.loss[name]=[v]
     def show(self):
         for name in self.loss:
             print(name,':loss',np.mean(self.loss[name]))
     def showcurrent(self):
+        if(self.useBar):
+            self.bar.suffix = (str(self))
+            self.bar.next()
+        else:
+            cnt=0
+            for name in self.loss:
+                if(name=='epoch' or name=='iteration'):
+                    print(name,":",int(self.loss[name][-1]), end=" ")
+                else:
+                    txt='{0:.'+str(self.precision)+'f}'
+                    print(name,txt.format(self.loss[name][-1]),end=" ")
+                cnt+=1
+                if(cnt>=10):
+                    print()
+                    cnt=0
+            print()
+    def getinfo(self):
+        out = ""
+        cnt = 0
         for name in self.loss:
-            txt='{0:.'+str(self.precision)+'f}'
-            print(name,txt.format(self.loss[name][-1]),end=" ")
-        print()
-    def clear(self):
+            if (name == 'epoch' or name == 'iteration'):
+                out += name+":"+str(self.loss[name][-1])+" "
+            else:
+                txt = '{0:.' + str(self.precision) + 'f}'
+                out += name + " " + txt.format(self.loss[name][-1]) + " "
+            cnt += 1
+            if (cnt >= 10):
+                out += '\n'
+                cnt = 0
+        return out
+    def __str__ (self):
+        return self.getinfo()
+    def finish(self):
+        self.show()
+        if self.useBar:self.bar.finish()
         self.loss={}

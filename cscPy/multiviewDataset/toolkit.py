@@ -46,16 +46,25 @@ class MultiviewDatasetDemo():
         cam_list = ['840412062035','840412062037','840412062038','840412062076']
         self.cam_list = cam_list
         cam_list.sort() 
-        camera, camera_pose = [], []
+        camera, camera_pose,Ks = [], [],[]
         for camera_ser in cam_list:
             camera.append(CameraIntrinsics[camera_ser])
             camera_pose.append(camera_pose_map[camera_ser])
+            K = np.eye(3)
+            K[0, 0] = CameraIntrinsics[camera_ser].fx
+            K[1, 1] = CameraIntrinsics[camera_ser].fy
+            K[0, 2] = CameraIntrinsics[camera_ser].cx
+            K[1, 2] = CameraIntrinsics[camera_ser].cy
+            Ks.append(K.copy())
         for i in range(4):
             if (np.allclose(camera_pose[i], np.eye(4))):
                 rootcameraidx = i
         # print("camera_pose",camera_pose)
-        self.camera_pose,self.camera=camera_pose,camera
+        self.camera_pose,self.camera,self.Ks=camera_pose,camera,Ks
         self.rootcameraidx=rootcameraidx
+
+
+
         print('self.rootcameraidx',self.rootcameraidx)
 
 

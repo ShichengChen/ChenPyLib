@@ -1,0 +1,28 @@
+epsilon=1e-6
+MV2mano_skeidx=[0,1,2,3, 5,6,7, 13,14,15, 9,10,11, 17,18,19, 20,4,8,12,16]
+
+
+import os
+manoPath='/home/csc/MANO-hand-model-toolkit/mano/models/MANO_RIGHT.pkl'
+if not os.path.exists(manoPath):
+    manoPath = '/home/shicheng/MANO-hand-model-toolkit/mano/models/MANO_RIGHT.pkl'
+if not os.path.exists(manoPath):
+    manoPath = '/home/csc/MANO-hand-model-toolkit/mano/models/MANO_RIGHT.pkl'
+
+mvdatasetpaths=['/media/csc/Seagate Backup Plus Drive/dataset/7-14-1-2/mlresults/7-14-1-2_3_5result_45.pkl',
+            '/media/csc/Seagate Backup Plus Drive/dataset/9-10-1-2/mlresults/9-10-1-2_1result_38.pkl',
+            '/media/csc/Seagate Backup Plus Drive/dataset/9-17-1-2/mlresults/9-17-1-2_7result_45.pkl',
+            '/media/csc/Seagate Backup Plus Drive/multicamera/9-25-1-2/mlresults/9-25-1-2_3result_45.pkl',
+           ]
+if not os.path.exists(mvdatasetpaths[0]):
+    mvdatasetpaths = ['/mnt/data/shicheng/7-14-1-2/mlresults/7-14-1-2_3_5result_45.pkl',
+                  '/mnt/data/shicheng/9-10-1-2/mlresults/9-10-1-2_1result_38.pkl',
+                  '/mnt/data/shicheng/9-17-1-2/mlresults/9-17-1-2_7result_45.pkl',
+                  '/mnt/data/shicheng/9-25-1-2/mlresults/9-25-1-2_3result_45.pkl',
+                  ]
+if not os.path.exists(mvdatasetpaths[0]):
+    mvdatasetpaths = ['/mnt/ssd/shicheng/7-14-1-2/mlresults/7-14-1-2_3_5result_45.pkl',
+                  '/mnt/ssd/shicheng/9-10-1-2/mlresults/9-10-1-2_1result_38.pkl',
+                  '/mnt/ssd/shicheng/9-17-1-2/mlresults/9-17-1-2_7result_45.pkl',
+                  '/mnt/ssd/shicheng/9-25-1-2/mlresults/9-25-1-2_3result_45.pkl',
+                  ]

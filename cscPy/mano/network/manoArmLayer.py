@@ -83,7 +83,7 @@ class MANO_SMPL(nn.Module):
 
         np_v_template=np.array(nvs).astype(float)
         np_v_template = torch.from_numpy(np_v_template).float()
-        print('np_v_template.shape',np_v_template.shape)
+        #print('np_v_template.shape',np_v_template.shape)
         self.faces=np.array(faces).astype(int)
         self.Nv=np_v_template.shape[0]
 
