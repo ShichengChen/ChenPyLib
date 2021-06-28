@@ -83,17 +83,7 @@ def getRefJoints(joint_gt):
             manotempJ[ci] = manotempJ[pi] + (manotempJ[pi] - manotempJ[ppi]) / dm * dp
         return manotempJ
 
-def getHomo3D(x):
-    if(torch.is_tensor(x)):
-        if(x.shape[-1]==4):return x
-        if(x.shape[-1]==1 and x.shape[-2]==4):return x
-        if(x.shape[-1]==1 and x.shape[-2]==3):
-            return torch.cat([x, torch.ones([*(x.shape[:-2])] + [1,1], dtype=torch.float32,device=x.device)], dim=-2)
-        if(x.shape[-1]==3):
-            return torch.cat([x, torch.ones([*(x.shape[:-1])] + [1], dtype=torch.float32,device=x.device)], dim=-1)
-    if(x.shape[-1]==3):
-        return np.concatenate([x,np.ones([*(x.shape[:-1])]+[1],dtype=np.float64)],axis=-1)
-    return x
+
 
 def disPoint2Plane(points,planeNorm,planeD):
     N = points.shape[0]

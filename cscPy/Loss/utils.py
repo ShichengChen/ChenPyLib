@@ -4,6 +4,10 @@ from cscPy.Const.const import *
 from progress.bar import Bar
 from termcolor import colored, cprint
 
+from torch.utils.tensorboard import SummaryWriter
+
+
+
 def meanEuclideanLoss(pred, gt, scale, jointNr=21):
     pred = pred.view([-1, jointNr, 3])
     gt = gt.reshape([-1, jointNr, 3])
@@ -55,16 +59,22 @@ def getLatentLoss(z_mean, z_stddev, goalStd=1.0, eps=1e-9):
 
 
 class LossHelper():
-    def __init__(self,precision=3,useBar=True):
+    def __init__(self,precision=3,useBar=True,usetb=True,summary=""):
         self.loss={}
         self.precision=int(precision)
         self.useBar=useBar
-    def initForEachEpoch(self,lenFordataloader):
+        self.usetb=usetb
+        if(usetb):
+            print("use tensorboard")
+            self.tb = SummaryWriter(comment=summary)
+
+    def initForEachEpoch(self,lenFordataloader,summaryVariable=[]):
         if(self.useBar):
             self.bar = Bar(colored('Train', 'yellow'), max=lenFordataloader)
+        self.summaryVariable=summaryVariable
     def add(self,dic):
         for name,value in dic.items():
-            if (name == 'epoch' or name == 'iteration'):v=int(value)
+            if (name == 'epoch' or name.startswith('iter')):v=int(value)
             else:v=float(value)
             if(name in self.loss):
                 self.loss[name].append(v)
@@ -72,36 +82,28 @@ class LossHelper():
                 self.loss[name]=[v]
     def show(self):
         for name in self.loss:
+            if (self.usetb and name in self.summaryVariable):
+                self.tb.add_scalar(name, np.mean(self.loss[name]), self.loss['epoch'][-1])
             print(name,':loss',np.mean(self.loss[name]))
     def showcurrent(self):
         if(self.useBar):
             self.bar.suffix = (str(self))
             self.bar.next()
         else:
-            cnt=0
-            for name in self.loss:
-                if(name=='epoch' or name=='iteration'):
-                    print(name,":",int(self.loss[name][-1]), end=" ")
-                else:
-                    txt='{0:.'+str(self.precision)+'f}'
-                    print(name,txt.format(self.loss[name][-1]),end=" ")
-                cnt+=1
-                if(cnt>=10):
-                    print()
-                    cnt=0
-            print()
+            print(str(self))
     def getinfo(self):
         out = ""
         cnt = 0
         for name in self.loss:
-            if (name == 'epoch' or name == 'iteration'):
+            if (name == 'epoch' or name.startswith('iter')):
                 out += name+":"+str(self.loss[name][-1])+" "
             else:
                 txt = '{0:.' + str(self.precision) + 'f}'
-                out += name + " " + txt.format(self.loss[name][-1]) + " "
+                out += name + " " + txt.format(np.mean(self.loss[name])) + " "
             cnt += 1
             if (cnt >= 10):
-                out += '\n'
+                if(self.useBar):out+=' '
+                else:out += '\n'
                 cnt = 0
         return out
     def __str__ (self):

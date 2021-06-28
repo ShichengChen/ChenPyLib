@@ -9,24 +9,19 @@ from cscPy.dataloader.MFjointsDataloader import MF3D
 import numpy as np
 import torch
 import cv2
-
+from cscPy.Const.const import *
 class MultiviewDatasetDemo():
-    def __init__(self,manoPath='/home/csc/MANO-hand-model-toolkit/mano/models/MANO_RIGHT.pkl',
-                 file_path="/media/csc/Seagate Backup Plus Drive/dataset/7-14-1-2/mlresults/7-14-1-2_3_2result_32.pkl",
+    def __init__(self,manoPath=manoPath,
+                 file_path=mvdatasetpaths[0],
                  #file_path="/media/csc/Seagate Backup Plus Drive/dataset/9-10-1-2/mlresults/9-10-1-2_1result_38.pkl",
                  loadMode=True,
                  readNotFromBinary=False,
                  loadManoParam=False,
 
     ):
-        if not os.path.exists(manoPath):
-            manoPath = '/home/shicheng/MANO-hand-model-toolkit/mano/models/MANO_RIGHT.pkl'
         self.mano_right = MANO_SMPL(manoPath, ncomps=45)
         self.readNotFromBinary=readNotFromBinary
         self.loadManoParam=loadManoParam
-
-        if(not os.path.exists(file_path)):
-            file_path="/mnt/ssd/csc/7-14-1-2/mlresults/7-14-1-2_3_2result_32.pkl"
         baseDir = file_path[:file_path.rfind('/', 0, file_path.rfind('/'))]
         self.baseDir=baseDir
         self.date = baseDir[baseDir.rfind('/') + 1:]

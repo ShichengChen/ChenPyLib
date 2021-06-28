@@ -8,46 +8,70 @@ from cscPy.mano.network.Const import boneSpace
 from cscPy.Const.const import epsilon
 
 class BiomechanicalLayer(nn.Module):
-    def __init__(self, fingerPlaneLoss=False,fingerFlexLoss=False,fingerAbductionLoss=False):
+    def __init__(self, fingerPlaneLoss=False,fingerFlexLoss=False,fingerAbductionLoss=False,fingerPlaneRotLoss=False):
         super(BiomechanicalLayer, self).__init__()
         ##only works for right hand!!!
         self.fingerPlaneLoss=fingerPlaneLoss
         self.fingerFlexLoss=fingerFlexLoss
         self.fingerAbductionLoss=fingerAbductionLoss
+        self.fingerPlaneRotLoss=fingerPlaneRotLoss
         self.nocheckScale=True
 
-    def forward(self,joint_gt: torch.Tensor,scale:torch.Tensor):
-        N=joint_gt.shape[0]
+    def forward(self,joints: torch.Tensor,scale:torch.Tensor):
+        N=joints.shape[0]
         bonelen=scale.reshape(N)
-        loss,disEudloss=0,0
+        loss,disEucloss={},{}
+        loss['p'],disEucloss['p'], joint_gt = self.restrainFingerDirectly(joints, bonelen)
         if(self.fingerPlaneLoss):
-            curloss,disEud,_=self.restrainFingerDirectly(joint_gt,bonelen)
-            # print("plane loss",disEud*1000)
-            loss+=curloss
-            disEudloss+=disEud
+            pass
+        if(self.fingerPlaneRotLoss):
+            loss['pr'],disEucloss['pr']=self.fingerPlaneRotationLoss(joints.clone(),bonelen)
         if(self.fingerFlexLoss):
-            _,_,joint_gt=self.restrainFingerDirectly(joint_gt,bonelen)
-            curloss,disEud=self.restrainFlexAngle(joint_gt,bonelen)
-            # print("flex loss",disEud*1000)
-            loss+=curloss
-            disEudloss += disEud
+            loss['f'],disEucloss['f']=self.restrainFlexAngle(joint_gt.clone(),bonelen)
             #print("flex loss",loss)
         if(self.fingerAbductionLoss):
-            _,_,joint_gt = self.restrainFingerDirectly(joint_gt,bonelen)
-            curloss,disEud=self.restrainAbductionAngle(joint_gt,bonelen)
-            # print("abduction loss",disEud*1000)
-            loss +=curloss
-            disEudloss += disEud
-        return loss,disEudloss
+            loss['ab'],disEucloss['ab']=self.restrainAbductionAngle(joint_gt.clone(),bonelen)
+        return loss,disEucloss
+
+    def fingerPlaneRotationLoss(self,joint_gt:torch.Tensor,bonelen: torch.Tensor,)\
+            ->(torch.Tensor,torch.Tensor,torch.Tensor):
+        N = joint_gt.shape[0]
+        normidx = [1, 2, 2, 3]
+        jidx = [[0, 1, 2, 3, 17], [0, 4, 5, 6, 18], [0, 10, 11, 12, 19], [0, 7, 8, 9, 20]]
+        angleP = torch.tensor([np.pi / 6],device=joint_gt.device, dtype=joint_gt.dtype)
+        angleM = torch.tensor([np.pi / 2],device=joint_gt.device, dtype=joint_gt.dtype)
+        loss,euc=torch.zeros_like(bonelen),torch.zeros_like(bonelen)
+        for idx,finger in enumerate(jidx):
+            #v0 = unit_vector(joint_gt[:, finger[1]] - joint_gt[:, finger[0]])
+            v1 = unit_vector(joint_gt[:, finger[2]] - joint_gt[:, finger[1]])
+            v2 = unit_vector(joint_gt[:, finger[3]] - joint_gt[:, finger[2]])
+            v3 = unit_vector(joint_gt[:, finger[4]] - joint_gt[:, finger[3]])
+
+            mask=(torch.sum(v1 * v2, dim=1)<0.8) & (torch.sum(v2 * v3, dim=1)<0.8)
+
+            if(torch.sum(mask)):
+                palmNorm = unit_vector(self.getPalmNormByIndex(joint_gt, normidx[idx]).reshape(N, 3))[mask]  # palm up
+                dis=euDist(joint_gt[:, finger[1]],joint_gt[:, finger[2]]).reshape(N)[mask]
+                a = unit_vector(torch.cross(v1, v2, dim=1)).reshape(N,3)
+                b = unit_vector(torch.cross(v2, v3, dim=1)).reshape(N,3)
+                c=((a+b)/2)[mask]
+
+                angle = torch.acos(torch.clamp(torch.sum(c * palmNorm, dim=1), -1 + epsilon, 1 - epsilon)).reshape(-1)
+
+                cur=torch.max(torch.abs(angle-angleM+epsilon)-angleP,torch.zeros_like(angle))*dis
+                loss += cur
+                euc+=cur*bonelen[mask]
+                print(finger,angle/3.14*180)
+        return torch.mean(loss)/4,torch.mean(euc)/4
 
 
     def restrainFingerDirectly(self, joint_gt: torch.Tensor,bonelen: torch.Tensor,)\
             ->(torch.Tensor,torch.Tensor,torch.Tensor):
         N = joint_gt.shape[0]
         newjoints_gt=joint_gt.clone()
-        distance=torch.zeros([N,21,1],device=joint_gt.device,requires_grad=False,dtype=joint_gt.dtype)
         jidx = [[1, 2, 3, 17], [4, 5, 6, 18], [10, 11, 12, 19], [7, 8, 9, 20], [13, 14, 15, 16]]
         from itertools import combinations
+        loss,euc=0,0
         for finger in jidx:
             subsets = list(combinations(finger, 3))
             vlist = []
@@ -60,10 +84,12 @@ class BiomechanicalLayer(nn.Module):
             subj = joint_gt[:, finger].reshape(N,4,3)
             vd = torch.mean(-torch.sum(subj * vh, dim=2), dim=1).reshape(N,1)
             for idx in range(4):
-                distance[:,finger[idx]], newjoints_gt[:, finger[idx]] = \
+                cur, newjoints_gt[:, finger[idx]] = \
                     projectPoint2Plane(joint_gt[:, finger[idx]], vh, vd)
-        cur=torch.mean(distance, dim=(1, 2))
-        return torch.mean(cur),torch.mean(cur*bonelen), newjoints_gt
+                # distance[:, finger[idx]]
+                loss+=cur.reshape(N)
+                euc+=cur.reshape(N)*bonelen
+        return torch.mean(loss)/21,torch.mean(euc)/21, newjoints_gt
 
     #n0=wrist tmcp imcp
     #n1=wrist imcp mmcp
@@ -150,6 +176,7 @@ class BiomechanicalLayer(nn.Module):
                 fingernorm = unit_vector(torch.cross(a, b, dim=1))
 
                 sign = torch.sum(fingernorm * stdFingerNorms[fidx], dim=1).reshape(N)
+                #print(fidx,torch.sum(a * b, dim=1))
                 angle = torch.acos(torch.clamp(torch.sum(a * b, dim=1), -1 + epsilon, 1 - epsilon)).reshape(N)
 
                 #print(finger[i:i+3],angle,angle/3.14*180,sign,disb)

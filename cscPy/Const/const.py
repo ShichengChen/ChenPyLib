@@ -26,3 +26,9 @@ if not os.path.exists(mvdatasetpaths[0]):
                   '/mnt/ssd/shicheng/9-17-1-2/mlresults/9-17-1-2_7result_45.pkl',
                   '/mnt/ssd/shicheng/9-25-1-2/mlresults/9-25-1-2_3result_45.pkl',
                   ]
+if not os.path.exists(mvdatasetpaths[0]):
+    mvdatasetpaths = ['/mnt/ssd/csc/7-14-1-2/mlresults/7-14-1-2_3_5result_45.pkl',
+                  '/mnt/ssd/csc/9-10-1-2/mlresults/9-10-1-2_1result_38.pkl',
+                  '/mnt/ssd/csc/9-17-1-2/mlresults/9-17-1-2_7result_45.pkl',
+                  '/mnt/ssd/csc/9-25-1-2/mlresults/9-25-1-2_3result_45.pkl',
+                  ]
