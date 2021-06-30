@@ -8,7 +8,7 @@ from cscPy.mano.network.Const import boneSpace
 from cscPy.Const.const import epsilon
 
 class BiomechanicalLayer(nn.Module):
-    def __init__(self, fingerPlaneLoss=False,fingerFlexLoss=False,fingerAbductionLoss=False,fingerPlaneRotLoss=False):
+    def __init__(self, fingerPlaneLoss=False,fingerFlexLoss=False,fingerAbductionLoss=False,fingerPlaneRotLoss=False,planerelax=0.9):
         super(BiomechanicalLayer, self).__init__()
         ##only works for right hand!!!
         self.fingerPlaneLoss=fingerPlaneLoss
@@ -16,11 +16,12 @@ class BiomechanicalLayer(nn.Module):
         self.fingerAbductionLoss=fingerAbductionLoss
         self.fingerPlaneRotLoss=fingerPlaneRotLoss
         self.nocheckScale=True
+        self.planerelax=planerelax
 
     def forward(self,joints: torch.Tensor,scale:torch.Tensor):
         N=joints.shape[0]
         bonelen=scale.reshape(N)
-        loss,disEucloss={},{}
+        loss,disEucloss={'p':0,'pr':0,'f':0,'ab':0},{'p':0,'pr':0,'f':0,'ab':0}
         loss['p'],disEucloss['p'], joint_gt = self.restrainFingerDirectly(joints, bonelen)
         if(self.fingerPlaneLoss):
             pass
@@ -47,21 +48,22 @@ class BiomechanicalLayer(nn.Module):
             v2 = unit_vector(joint_gt[:, finger[3]] - joint_gt[:, finger[2]])
             v3 = unit_vector(joint_gt[:, finger[4]] - joint_gt[:, finger[3]])
 
-            mask=(torch.sum(v1 * v2, dim=1)<0.8) & (torch.sum(v2 * v3, dim=1)<0.8)
+            mask=(torch.sum(v1 * v2, dim=1)<self.planerelax) & (torch.sum(v2 * v3, dim=1)<self.planerelax)
 
             if(torch.sum(mask)):
-                palmNorm = unit_vector(self.getPalmNormByIndex(joint_gt, normidx[idx]).reshape(N, 3))[mask]  # palm up
-                dis=euDist(joint_gt[:, finger[1]],joint_gt[:, finger[2]]).reshape(N)[mask]
+                palmNorm = unit_vector(self.getPalmNormByIndex(joint_gt, normidx[idx]).reshape(N, 3))  # palm up
+                dis=euDist(joint_gt[:, finger[1]],joint_gt[:, finger[2]]).reshape(N)
                 a = unit_vector(torch.cross(v1, v2, dim=1)).reshape(N,3)
                 b = unit_vector(torch.cross(v2, v3, dim=1)).reshape(N,3)
-                c=((a+b)/2)[mask]
+                c=((a+b)/2)
 
                 angle = torch.acos(torch.clamp(torch.sum(c * palmNorm, dim=1), -1 + epsilon, 1 - epsilon)).reshape(-1)
 
                 cur=torch.max(torch.abs(angle-angleM+epsilon)-angleP,torch.zeros_like(angle))*dis
+                cur[mask==False]=0
                 loss += cur
-                euc+=cur*bonelen[mask]
-                print(finger,angle/3.14*180)
+                euc+=cur*bonelen
+                #print(finger,angle/3.14*180)
         return torch.mean(loss)/4,torch.mean(euc)/4
 
 
@@ -124,7 +126,7 @@ class BiomechanicalLayer(nn.Module):
             wrist=joints[:,0]
             projpip=projectPoint2Plane(pip,vh,vd)[1].reshape(N,3)
             dis=euDist(mcp,pip).reshape(N)
-            flexRatio=euDist(projpip,mcp).reshape(N)/(dis+1e-8)
+            flexRatio=euDist(projpip,mcp).reshape(N)/(dis+epsilon)
             flexRatio[flexRatio<0.1]=0
             #valid=flexRatio>0.1
             #remove influence of perpendicular fingers
@@ -171,7 +173,9 @@ class BiomechanicalLayer(nn.Module):
             if(fidx==4):angleN=angleNthumb
             for i in fidces[fidx]:
                 a0, a1, a2 = joints[:, finger[i]], joints[:, finger[i + 1]], joints[:, finger[i + 2]].reshape(N, 3)
+
                 a, b = unit_vector(a1 - a0), unit_vector(a2 - a1)
+                removed = (torch.sum(a * b, dim=1) > self.planerelax)
                 disb=euDist(a1,a2).reshape(N)
                 fingernorm = unit_vector(torch.cross(a, b, dim=1))
 
@@ -180,7 +184,8 @@ class BiomechanicalLayer(nn.Module):
                 angle = torch.acos(torch.clamp(torch.sum(a * b, dim=1), -1 + epsilon, 1 - epsilon)).reshape(N)
 
                 #print(finger[i:i+3],angle,angle/3.14*180,sign,disb)
-                angle=torch.abs(1e-8+angle)
+                assert torch.sum(angle<0)==0
+                angle[removed]=0
                 #print("sign",sign)
                 maskpositive=(sign>=0)
                 masknegative=(sign<0)

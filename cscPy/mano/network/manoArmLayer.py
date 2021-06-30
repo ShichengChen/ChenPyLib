@@ -127,6 +127,8 @@ class MANO_SMPL(nn.Module):
 
         self.parents = np.array(model['kintree_table'])[0].astype(np.int32)
         #print('self.parents',self.parents)
+        # [-1  0  1  2  0  4  5  0  7  8  0 10 11  0 13 14]
+
         np_weights = np.array(model['weights'], dtype=np.float)
         np_weightstail = np.ones([self.Nv - np_weights.shape[0], 16], dtype=np.float)
         np_weightstail[:,1:]*=0
@@ -688,7 +690,7 @@ class MANO_SMPL(nn.Module):
             transformL[:,idx + 1] = tr.clone()
             Gp = transformG[:,self.parents[idx + 1]].reshape(N,4,4)
             transformG[:,idx + 1] = transformL[:,idx + 1].clone() @ Gp.clone()
-            transformLmano[:,idx + 1] = torch.inverse(Gp).clone() @ transformL[:,idx + 1].clone() @ Gp.clone()
+            transformLmano[:,idx + 1] = (torch.inverse(Gp) @ transformL[:,idx + 1].clone() @ Gp.clone())
 
             for child in childern[pi]:
                 t1 = (tempJ[:,child] - tempJ[:,pi]).reshape(N,3,1)

@@ -1,6 +1,6 @@
 epsilon=1e-6
 MV2mano_skeidx=[0,1,2,3, 5,6,7, 13,14,15, 9,10,11, 17,18,19, 20,4,8,12,16]
-
+RHD2mano_skeidx=[0,8,7,6, 12,11,10, 20,19,18, 16,15,14, 4,3,2,1, 5,9,13,17]
 
 import os
 manoPath='/home/csc/MANO-hand-model-toolkit/mano/models/MANO_RIGHT.pkl'
