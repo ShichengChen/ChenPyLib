@@ -34,8 +34,12 @@ class MultiviewDatasetDemo():
         if(not self.readNotFromBinary):
             self.rgb_seqs = [load_rgb_maps(p)[100:] for p in rgb_paths]
             self.depth_seqs = [load_depth_maps(p)[100:] for p in depth_paths]
-            self.dms = np.memmap(os.path.join(baseDir, 'mlresults', '1_mask.bin'),
-                            dtype=np.bool, mode='r', shape=(4, 5300, 480, 640))
+            maskpath=os.path.join(baseDir, 'mlresults', '1_mask.bin')
+            if(os.path.exists(maskpath)):
+                self.dms = np.memmap(maskpath,dtype=np.bool, mode='r', shape=(4, 5300, 480, 640))
+            else:
+                self.dms = None
+
 
 
         cam_list = ['840412062035','840412062037','840412062038','840412062076']
@@ -183,7 +187,8 @@ class MultiviewDatasetDemo():
         for iv in range(4):
             img=self.readRGB(idx,iv)
             if facemask and self.readNotFromBinary==False:
-                mask = self.dms[iv][idx].copy()
+                if(self.dms is None):mask=np.ones([img.shape[0],img.shape[1]],dtype=np.bool)
+                else:mask = self.dms[iv][idx].copy()
                 kernel = np.ones((17, 17), np.uint8)
                 mask = cv2.dilate(mask.astype(np.uint8), kernel, iterations=1).astype(np.bool)
                 for (x, y, x1, y1) in facelist[iv]:
