@@ -48,21 +48,24 @@ class BiomechanicalLayer(nn.Module):
             v2 = unit_vector(joint_gt[:, finger[3]] - joint_gt[:, finger[2]])
             v3 = unit_vector(joint_gt[:, finger[4]] - joint_gt[:, finger[3]])
 
-            mask=(torch.sum(v1 * v2, dim=1)<self.planerelax) & (torch.sum(v2 * v3, dim=1)<self.planerelax)
+            mask=(torch.sum(v1 * v2, dim=1)<self.planerelax) &\
+                 (torch.sum(v2 * v3, dim=1)<self.planerelax)
+            mask2 = (torch.sum(v1 * v2, dim=1) >= 0) & \
+                   (torch.sum(v2 * v3, dim=1) >= 0)
 
-            if(torch.sum(mask)):
-                palmNorm = unit_vector(self.getPalmNormByIndex(joint_gt, normidx[idx]).reshape(N, 3))  # palm up
-                dis=euDist(joint_gt[:, finger[1]],joint_gt[:, finger[2]]).reshape(N)
-                a = unit_vector(torch.cross(v1, v2, dim=1)).reshape(N,3)
-                b = unit_vector(torch.cross(v2, v3, dim=1)).reshape(N,3)
-                c=((a+b)/2)
+            palmNorm = unit_vector(self.getPalmNormByIndex(joint_gt, normidx[idx]).reshape(N, 3))  # palm up
+            dis=euDist(joint_gt[:, finger[1]],joint_gt[:, finger[2]]).reshape(N)
+            a = unit_vector(torch.cross(v1, v2, dim=1)).reshape(N,3)
+            b = unit_vector(torch.cross(v2, v3, dim=1)).reshape(N,3)
+            c=((a+b)/2)
 
-                angle = torch.acos(torch.clamp(torch.sum(c * palmNorm, dim=1), -1 + epsilon, 1 - epsilon)).reshape(-1)
+            angle = torch.acos(torch.clamp(torch.sum(c * palmNorm, dim=1), -1 + epsilon, 1 - epsilon)).reshape(-1)
 
-                cur=torch.max(torch.abs(angle-angleM+epsilon)-angleP,torch.zeros_like(angle))*dis
-                cur[mask==False]=0
-                loss += cur
-                euc+=cur*bonelen
+            cur=torch.max(torch.abs(angle-angleM+epsilon)-angleP,torch.zeros_like(angle))*dis
+            cur[mask==False]=0
+            cur[mask2==False]=0
+            loss += cur
+            euc+=cur*bonelen
                 #print(finger,angle/3.14*180)
         return torch.mean(loss)/4,torch.mean(euc)/4
 
@@ -175,7 +178,7 @@ class BiomechanicalLayer(nn.Module):
                 a0, a1, a2 = joints[:, finger[i]], joints[:, finger[i + 1]], joints[:, finger[i + 2]].reshape(N, 3)
 
                 a, b = unit_vector(a1 - a0), unit_vector(a2 - a1)
-                removed = (torch.sum(a * b, dim=1) > self.planerelax)
+                removed = (torch.abs(torch.sum(a * b, dim=1)) > self.planerelax)
                 disb=euDist(a1,a2).reshape(N)
                 fingernorm = unit_vector(torch.cross(a, b, dim=1))
 

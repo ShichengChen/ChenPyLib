@@ -335,12 +335,31 @@ def ICP(a,b,mask,root):
 def getRotationBetweenTwoMeshBone(a,b,weight,rt=False,ICP=False):
     N,n,d=a.shape[0],a.shape[1],a.shape[2]
     if(ICP==True):
-        aave,bave=torch.mean(a,dim=1,keepdim=True),torch.mean(b,dim=1,keepdim=True)
-        x = (a - aave).reshape(N, n, d)
-        y = (b - bave).reshape(N, n, d)
-        r = svdForRotationWithoutW(x, y)
-        t = bave - aave @ r
-        return r, t
+        usepytorch3d=False
+        usegoicp=True
+        mask = weight.reshape(n).clone()
+        mask[mask > 0.5] = 1
+        mask = mask.long()
+        a, b = a[:, mask].clone(), b[:, mask].clone()
+        if(usepytorch3d):
+            from pytorch3d.ops import iterative_closest_point
+            icpout = iterative_closest_point(a, b)
+            r,t=icpout.RTs.R,icpout.RTs.T
+            return r, t
+        if(usegoicp):
+            from py_goicp import GoICP, POINT3D, ROTNODE, TRANSNODE
+            def loadpoints(pt):
+                if(torch.is_tensor(pt)):pt=pt.detach().cpu().numpy()
+                pt=pt.reshape(21,3)
+                p3dlist = [POINT3D(i[0],i[1],i[2]) for i in pt]
+
+
+        # aave,bave=torch.mean(a,dim=1,keepdim=True),torch.mean(b,dim=1,keepdim=True)
+        # x = (a - aave).reshape(N, n, d)
+        # y = (b - bave).reshape(N, n, d)
+        # r = svdForRotationWithoutW(x, y)
+        # t = bave - aave @ r
+
     weight=weight.reshape(n)
     if(rt==False):
         assert False,"unknown bug here"
@@ -354,7 +373,7 @@ def getRotationBetweenTwoMeshBone(a,b,weight,rt=False,ICP=False):
         r = svdForRotation(x, weight, y)
         #r = lstsqForR(x,weight,y)
         t = bave - aave @ r
-        aa = (r @ a.reshape(N, 778, 3, 1) + t.reshape(N, 1, 3, 1)).reshape(N, 778, 3)
+        #aa = (r @ a.reshape(N, 778, 3, 1) + t.reshape(N, 1, 3, 1)).reshape(N, 778, 3)
         '''
         curweight=torch.sum(weight_coeff[bonelist[idx]],dim=0).reshape(N,778,1,1)
         curidx=(torch.sum(weight_coeff[bonelist[idx]],dim=0).reshape(N,778)>0.7)

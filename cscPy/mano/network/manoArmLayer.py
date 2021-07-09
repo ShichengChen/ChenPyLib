@@ -792,7 +792,7 @@ class MANO_SMPL(nn.Module):
             tr = torch.eye(4, dtype=torch.float32,device=device).reshape(1, 4, 4).repeat(N,1,1)
             #print(tempV.shape,vertices_gt.shape,weight_coeff[pi].shape)
             #print(np.arange(self.Nv)[weight_coeff[pi]>.9])
-            r,t = getRotationBetweenTwoMeshBone(tempV, vertices_gt,weight_coeff[pi].clone(),rt=True)
+            r,t = getRotationBetweenTwoMeshBone(tempV, vertices_gt,weight_coeff[pi].clone(),ICP=True)
             pret = (tempJ[:, pi]).reshape(N, 1,3)
             # tempV, vertices_gt = tempV - pret, vertices_gt - pret
             # r0 = getRotationBetweenTwoMeshBone(tempV, vertices_gt,weight_coeff[pi].clone())

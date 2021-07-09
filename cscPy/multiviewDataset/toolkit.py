@@ -14,7 +14,7 @@ class MultiviewDatasetDemo():
     def __init__(self,manoPath=manoPath,
                  file_path=mvdatasetpaths[0],
                  #file_path="/media/csc/Seagate Backup Plus Drive/dataset/9-10-1-2/mlresults/9-10-1-2_1result_38.pkl",
-                 loadMode=True,
+                 loadMode=False,
                  readNotFromBinary=False,
                  loadManoParam=False,
 
